@@ -245,8 +245,8 @@ func (p *parser) parseSelect() (Statement, error) {
 		}
 		limit = &n
 	}
-	if !p.atEnd() {
-		return nil, p.errorAt("unexpected tokens after SELECT")
+	if err := p.finishStatement("SELECT"); err != nil {
+		return nil, err
 	}
 	return SelectStmt{Table: table, Where: conds, Limit: limit}, nil
 }
@@ -265,8 +265,8 @@ func (p *parser) parseInsert() (Statement, error) {
 	if !p.consumePlaceholder() {
 		return nil, p.errorAt("expected ? placeholder")
 	}
-	if !p.atEnd() {
-		return nil, p.errorAt("unexpected tokens after INSERT")
+	if err := p.finishStatement("INSERT"); err != nil {
+		return nil, err
 	}
 	return InsertStmt{Table: table}, nil
 }
@@ -290,15 +290,12 @@ func (p *parser) parseUpdate() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	var ret *Returning
-	if p.consumeKeyword("RETURNING") {
-		ret, err = p.parseReturning()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := p.parseOptionalReturning()
+	if err != nil {
+		return nil, err
 	}
-	if !p.atEnd() {
-		return nil, p.errorAt("unexpected tokens after UPDATE")
+	if err := p.finishStatement("UPDATE"); err != nil {
+		return nil, err
 	}
 	return UpdateStmt{Table: table, Set: setClauses, Where: conds, Returning: ret}, nil
 }
@@ -318,15 +315,12 @@ func (p *parser) parseDelete() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
-	var ret *Returning
-	if p.consumeKeyword("RETURNING") {
-		ret, err = p.parseReturning()
-		if err != nil {
-			return nil, err
-		}
+	ret, err := p.parseOptionalReturning()
+	if err != nil {
+		return nil, err
 	}
-	if !p.atEnd() {
-		return nil, p.errorAt("unexpected tokens after DELETE")
+	if err := p.finishStatement("DELETE"); err != nil {
+		return nil, err
 	}
 	return DeleteStmt{Table: table, Where: conds, Returning: ret}, nil
 }
@@ -354,18 +348,13 @@ func (p *parser) parseSetClauses() ([]SetClause, error) {
 
 func (p *parser) parseWhere() ([]Cond, error) {
 	var conds []Cond
-	cond, err := p.parseCond()
-	if err != nil {
-		return nil, err
-	}
-	conds = append(conds, cond)
 	for {
+		cond, err := p.parseCond()
+		if err != nil {
+			return nil, err
+		}
+		conds = append(conds, cond)
 		if p.consumeKeyword("AND") {
-			cond, err = p.parseCond()
-			if err != nil {
-				return nil, err
-			}
-			conds = append(conds, cond)
 			continue
 		}
 		if p.consumeKeyword("OR") || p.consumeKeyword("NOT") {
@@ -378,23 +367,7 @@ func (p *parser) parseWhere() ([]Cond, error) {
 
 func (p *parser) parseCond() (Cond, error) {
 	if p.consumeKeyword("begins_with") {
-		if !p.consumeSymbol("(") {
-			return Cond{}, p.errorAt("expected (")
-		}
-		attr, err := p.parseIdent()
-		if err != nil {
-			return Cond{}, err
-		}
-		if !p.consumeSymbol(",") {
-			return Cond{}, p.errorAt("expected ,")
-		}
-		if !p.consumePlaceholder() {
-			return Cond{}, p.errorAt("expected ? placeholder")
-		}
-		if !p.consumeSymbol(")") {
-			return Cond{}, p.errorAt("expected )")
-		}
-		return Cond{Type: CondBeginsWith, Attr: attr}, nil
+		return p.parseFuncCond(CondBeginsWith)
 	}
 	attr, err := p.parseIdent()
 	if err != nil {
@@ -427,6 +400,26 @@ func (p *parser) parseCond() (Cond, error) {
 	return Cond{}, p.errorAt("expected condition")
 }
 
+func (p *parser) parseFuncCond(condType CondType) (Cond, error) {
+	if !p.consumeSymbol("(") {
+		return Cond{}, p.errorAt("expected (")
+	}
+	attr, err := p.parseIdent()
+	if err != nil {
+		return Cond{}, err
+	}
+	if !p.consumeSymbol(",") {
+		return Cond{}, p.errorAt("expected ,")
+	}
+	if !p.consumePlaceholder() {
+		return Cond{}, p.errorAt("expected ? placeholder")
+	}
+	if !p.consumeSymbol(")") {
+		return Cond{}, p.errorAt("expected )")
+	}
+	return Cond{Type: condType, Attr: attr}, nil
+}
+
 func (p *parser) parseReturning() (*Returning, error) {
 	modeAll := p.consumeKeyword("ALL")
 	modeUpdated := p.consumeKeyword("UPDATED")
@@ -448,6 +441,20 @@ func (p *parser) parseReturning() (*Returning, error) {
 		return &Returning{Mode: ReturnUpdatedNew}, nil
 	}
 	return nil, p.errorAt("expected OLD or NEW")
+}
+
+func (p *parser) parseOptionalReturning() (*Returning, error) {
+	if !p.consumeKeyword("RETURNING") {
+		return nil, nil
+	}
+	return p.parseReturning()
+}
+
+func (p *parser) finishStatement(kind string) error {
+	if p.atEnd() {
+		return nil
+	}
+	return p.errorAt("unexpected tokens after " + kind)
 }
 
 func (p *parser) parseIdent() (string, error) {
