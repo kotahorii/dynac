@@ -85,24 +85,8 @@ func parseFile(reg *Registry, path string) error {
 	if err != nil {
 		return err
 	}
-	for _, imp := range file.Imports {
-		impPath, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			return err
-		}
-		alias := ""
-		if imp.Name != nil {
-			alias = imp.Name.Name
-		} else {
-			alias = filepath.Base(impPath)
-		}
-		if alias == "_" || alias == "." {
-			continue
-		}
-		if prev, ok := reg.Imports[alias]; ok && prev != impPath {
-			return fmt.Errorf("import alias conflict for %s: %s vs %s", alias, prev, impPath)
-		}
-		reg.Imports[alias] = impPath
+	if err := parseImports(reg, file.Imports); err != nil {
+		return err
 	}
 	for _, decl := range file.Decls {
 		gen, ok := decl.(*ast.GenDecl)
@@ -111,37 +95,11 @@ func parseFile(reg *Registry, path string) error {
 		}
 		for _, spec := range gen.Specs {
 			ts := spec.(*ast.TypeSpec)
-			st, ok := ts.Type.(*ast.StructType)
-			if !ok {
-				continue
+			fields, ok, err := parseStructFields(fset, ts)
+			if err != nil {
+				return err
 			}
-			fields := map[string]FieldInfo{}
-			for _, field := range st.Fields.List {
-				if field.Tag == nil {
-					continue
-				}
-				if len(field.Names) == 0 {
-					continue
-				}
-				tagVal, err := strconv.Unquote(field.Tag.Value)
-				if err != nil {
-					return err
-				}
-				tag := reflect.StructTag(tagVal)
-				dyn := tag.Get("dynamodbav")
-				if dyn == "" || dyn == "-" {
-					continue
-				}
-				attr := strings.Split(dyn, ",")[0]
-				if attr == "" {
-					continue
-				}
-				if _, ok := fields[attr]; ok {
-					return fmt.Errorf("%s: duplicate attribute %s", ts.Name.Name, attr)
-				}
-				fields[attr] = FieldInfo{GoType: exprString(fset, field.Type)}
-			}
-			if len(fields) > 0 {
+			if ok && len(fields) > 0 {
 				reg.Types[ts.Name.Name] = TypeInfo{Name: ts.Name.Name, Fields: fields}
 			}
 		}
@@ -170,4 +128,58 @@ func (r *Registry) FieldType(modelName, attr string) (string, bool) {
 func (r *Registry) HasModel(name string) bool {
 	_, ok := r.Types[name]
 	return ok
+}
+
+func parseImports(reg *Registry, imports []*ast.ImportSpec) error {
+	for _, imp := range imports {
+		impPath, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			return err
+		}
+		alias := ""
+		if imp.Name != nil {
+			alias = imp.Name.Name
+		} else {
+			alias = filepath.Base(impPath)
+		}
+		if alias == "_" || alias == "." {
+			continue
+		}
+		if prev, ok := reg.Imports[alias]; ok && prev != impPath {
+			return fmt.Errorf("import alias conflict for %s: %s vs %s", alias, prev, impPath)
+		}
+		reg.Imports[alias] = impPath
+	}
+	return nil
+}
+
+func parseStructFields(fset *token.FileSet, ts *ast.TypeSpec) (map[string]FieldInfo, bool, error) {
+	st, ok := ts.Type.(*ast.StructType)
+	if !ok {
+		return nil, false, nil
+	}
+	fields := map[string]FieldInfo{}
+	for _, field := range st.Fields.List {
+		if field.Tag == nil || len(field.Names) == 0 {
+			continue
+		}
+		tagVal, err := strconv.Unquote(field.Tag.Value)
+		if err != nil {
+			return nil, true, err
+		}
+		tag := reflect.StructTag(tagVal)
+		dyn := tag.Get("dynamodbav")
+		if dyn == "" || dyn == "-" {
+			continue
+		}
+		attr := strings.Split(dyn, ",")[0]
+		if attr == "" {
+			continue
+		}
+		if _, ok := fields[attr]; ok {
+			return nil, true, fmt.Errorf("%s: duplicate attribute %s", ts.Name.Name, attr)
+		}
+		fields[attr] = FieldInfo{GoType: exprString(fset, field.Type)}
+	}
+	return fields, true, nil
 }
