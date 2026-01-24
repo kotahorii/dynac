@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,9 +41,9 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "generate":
-		runGenerate(os.Args[2:])
+		os.Exit(runGenerate(os.Args[2:], os.Stderr))
 	case "vet":
-		runVet(os.Args[2:])
+		os.Exit(runVet(os.Args[2:], os.Stderr))
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -68,9 +69,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  --queries query root (default queries)")
 }
 
-func runGenerate(args []string) {
+func runGenerate(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	table := fs.String("table", "", "table name")
 	pkgPath := fs.String("pkg", "internal/ddb", "output package path")
 	pk := fs.String("pk", "pk", "partition key name")
@@ -79,30 +80,21 @@ func runGenerate(args []string) {
 	var modelPaths stringSlice
 	fs.Var(&modelPaths, "model", "model file or directory")
 	if err := fs.Parse(args); err != nil {
-		os.Exit(2)
+		return 2
 	}
 	if len(modelPaths) == 0 {
-		fmt.Fprintln(os.Stderr, "--model is required for generate")
-		os.Exit(2)
+		fmt.Fprintln(stderr, "--model is required for generate")
+		return 2
 	}
-	files, err := query.DiscoverQueryFiles(*queriesRoot)
+	queries, err := loadQueries(*queriesRoot)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "discover queries: %v\n", err)
-		os.Exit(1)
-	}
-	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "no .partiql files under %s\n", *queriesRoot)
-		os.Exit(1)
-	}
-	queries, err := query.LoadFiles(files)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "load queries: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 	models, err := model.Parse(modelPaths)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load models: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "load models: %v\n", err)
+		return 1
 	}
 	pkgName := filepath.Base(filepath.Clean(*pkgPath))
 	gen := gen.Generator{
@@ -115,48 +107,56 @@ func runGenerate(args []string) {
 	}
 	out, err := gen.Generate(queries)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "generate: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "generate: %v\n", err)
+		return 1
 	}
 	if err := os.MkdirAll(*pkgPath, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "mkdir: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "mkdir: %v\n", err)
+		return 1
 	}
 	outPath := filepath.Join(*pkgPath, "queries_gen.go")
 	if err := os.WriteFile(outPath, out, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "write: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "write: %v\n", err)
+		return 1
 	}
+	return 0
 }
 
-func runVet(args []string) {
+func runVet(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("vet", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	table := fs.String("table", "", "table name")
 	pk := fs.String("pk", "pk", "partition key name")
 	sk := fs.String("sk", "sk", "sort key name")
 	queriesRoot := fs.String("queries", "queries", "query root")
 	if err := fs.Parse(args); err != nil {
-		os.Exit(2)
+		return 2
 	}
-	files, err := query.DiscoverQueryFiles(*queriesRoot)
+	queries, err := loadQueries(*queriesRoot)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "discover queries: %v\n", err)
-		os.Exit(1)
-	}
-	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "no .partiql files under %s\n", *queriesRoot)
-		os.Exit(1)
-	}
-	queries, err := query.LoadFiles(files)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "load queries: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 	for _, q := range queries {
 		if err := q.Validate(query.ValidateOptions{Table: *table, PK: *pk, SK: *sk}); err != nil {
-			fmt.Fprintf(os.Stderr, "vet: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "vet: %v\n", err)
+			return 1
 		}
 	}
+	return 0
+}
+
+func loadQueries(root string) ([]query.Query, error) {
+	files, err := query.DiscoverQueryFiles(root)
+	if err != nil {
+		return nil, fmt.Errorf("discover queries: %w", err)
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no .partiql files under %s", root)
+	}
+	queries, err := query.LoadFiles(files)
+	if err != nil {
+		return nil, fmt.Errorf("load queries: %w", err)
+	}
+	return queries, nil
 }
