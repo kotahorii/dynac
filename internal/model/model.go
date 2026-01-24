@@ -49,7 +49,7 @@ func collectGoFiles(path string) ([]string, error) {
 		return nil, err
 	}
 	if !info.IsDir() {
-		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+		if isGoFile(path) {
 			return []string{path}, nil
 		}
 		return nil, fmt.Errorf("model path must be .go file or directory: %s", path)
@@ -64,7 +64,7 @@ func collectGoFiles(path string) ([]string, error) {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
+		if isGoFile(name) {
 			files = append(files, filepath.Join(path, name))
 		}
 	}
@@ -72,6 +72,11 @@ func collectGoFiles(path string) ([]string, error) {
 		return nil, fmt.Errorf("no .go files in %s", path)
 	}
 	return files, nil
+}
+
+func isGoFile(path string) bool {
+	name := filepath.Base(path)
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
 }
 
 func parseFile(reg *Registry, path string) error {

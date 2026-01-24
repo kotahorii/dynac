@@ -94,10 +94,10 @@ func LoadFile(path string) ([]Query, error) {
 	}
 	lines := strings.Split(string(data), "\n")
 	var (
-		queries []Query
-		current *Query
+		queries  []Query
+		current  *Query
 		sqlLines []string
-		seen = map[string]bool{}
+		seen     = map[string]bool{}
 	)
 	flush := func() error {
 		if current == nil {
@@ -404,9 +404,6 @@ func ensureNoSelectAnnotations(q Query) error {
 }
 
 func validateUpdate(q Query, stmt partiql.UpdateStmt, opts ValidateOptions) error {
-	if q.Annotations.Index != nil {
-		return fmt.Errorf("%s: @index is not allowed for UPDATE", q.Name)
-	}
 	if err := checkTable(stmt.Table, opts.Table); err != nil {
 		return err
 	}
@@ -419,15 +416,8 @@ func validateUpdate(q Query, stmt partiql.UpdateStmt, opts ValidateOptions) erro
 	if q.Kind != KindExec && q.Kind != KindOne {
 		return fmt.Errorf("%s: UPDATE must be :exec or :one", q.Name)
 	}
-	if len(stmt.Set) == 0 {
-		return fmt.Errorf("%s: UPDATE requires SET", q.Name)
-	}
-	seen := map[string]bool{}
-	for _, clause := range stmt.Set {
-		if seen[clause.Attr] {
-			return fmt.Errorf("%s: duplicate SET attribute %s", q.Name, clause.Attr)
-		}
-		seen[clause.Attr] = true
+	if err := validateSetClauses(q, stmt.Set); err != nil {
+		return err
 	}
 	pk, sk, err := resolveKeys(q, opts)
 	if err != nil {
@@ -444,9 +434,6 @@ func validateUpdate(q Query, stmt partiql.UpdateStmt, opts ValidateOptions) erro
 }
 
 func validateDelete(q Query, stmt partiql.DeleteStmt, opts ValidateOptions) error {
-	if q.Annotations.Index != nil {
-		return fmt.Errorf("%s: @index is not allowed for DELETE", q.Name)
-	}
 	if err := checkTable(stmt.Table, opts.Table); err != nil {
 		return err
 	}
@@ -473,6 +460,20 @@ func validateDelete(q Query, stmt partiql.DeleteStmt, opts ValidateOptions) erro
 	}
 	if err := validateKeyConditionsExact(q, conds, pk, sk); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateSetClauses(q Query, clauses []partiql.SetClause) error {
+	if len(clauses) == 0 {
+		return fmt.Errorf("%s: UPDATE requires SET", q.Name)
+	}
+	seen := map[string]bool{}
+	for _, clause := range clauses {
+		if seen[clause.Attr] {
+			return fmt.Errorf("%s: duplicate SET attribute %s", q.Name, clause.Attr)
+		}
+		seen[clause.Attr] = true
 	}
 	return nil
 }
