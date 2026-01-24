@@ -332,33 +332,11 @@ func validateSelect(q Query, stmt partiql.SelectStmt, opts ValidateOptions) erro
 	if err := checkTable(stmt.Table, opts.Table); err != nil {
 		return err
 	}
-	if q.Annotations.Projection != "" && q.Annotations.Index == nil {
-		return fmt.Errorf("%s: @projection requires @index", q.Name)
+	if err := validateProjection(q); err != nil {
+		return err
 	}
-	if q.Annotations.Index != nil && q.Annotations.Projection != "all" {
-		return fmt.Errorf("%s: @index requires @projection all", q.Name)
-	}
-	if q.Annotations.Projection != "" && q.Annotations.Projection != "all" {
-		return fmt.Errorf("%s: only @projection all is supported", q.Name)
-	}
-	if q.Kind == KindMany {
-		if stmt.Limit != nil && q.Annotations.Limit != nil {
-			return fmt.Errorf("%s: use either LIMIT or @limit", q.Name)
-		}
-		if q.Annotations.NoLimit && (stmt.Limit != nil || q.Annotations.Limit != nil) {
-			return fmt.Errorf("%s: @nolimit conflicts with limit", q.Name)
-		}
-		if !q.Annotations.NoLimit && stmt.Limit == nil && q.Annotations.Limit == nil {
-			return fmt.Errorf("%s: :many requires LIMIT/@limit or @nolimit", q.Name)
-		}
-		if stmt.Limit != nil && *stmt.Limit <= 0 {
-			return fmt.Errorf("%s: LIMIT must be positive", q.Name)
-		}
-	}
-	if q.Kind != KindMany {
-		if stmt.Limit != nil || q.Annotations.Limit != nil || q.Annotations.NoLimit {
-			return fmt.Errorf("%s: limit annotations only valid for :many", q.Name)
-		}
+	if err := validateSelectLimit(q, stmt); err != nil {
+		return err
 	}
 	keyPK, keySK, err := resolveKeys(q, opts)
 	if err != nil {
@@ -375,6 +353,41 @@ func validateSelect(q Query, stmt partiql.SelectStmt, opts ValidateOptions) erro
 		if err := validateOneSelect(q, conds, keyPK, keySK); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateProjection(q Query) error {
+	if q.Annotations.Projection != "" && q.Annotations.Index == nil {
+		return fmt.Errorf("%s: @projection requires @index", q.Name)
+	}
+	if q.Annotations.Index != nil && q.Annotations.Projection != "all" {
+		return fmt.Errorf("%s: @index requires @projection all", q.Name)
+	}
+	if q.Annotations.Projection != "" && q.Annotations.Projection != "all" {
+		return fmt.Errorf("%s: only @projection all is supported", q.Name)
+	}
+	return nil
+}
+
+func validateSelectLimit(q Query, stmt partiql.SelectStmt) error {
+	if q.Kind == KindMany {
+		if stmt.Limit != nil && q.Annotations.Limit != nil {
+			return fmt.Errorf("%s: use either LIMIT or @limit", q.Name)
+		}
+		if q.Annotations.NoLimit && (stmt.Limit != nil || q.Annotations.Limit != nil) {
+			return fmt.Errorf("%s: @nolimit conflicts with limit", q.Name)
+		}
+		if !q.Annotations.NoLimit && stmt.Limit == nil && q.Annotations.Limit == nil {
+			return fmt.Errorf("%s: :many requires LIMIT/@limit or @nolimit", q.Name)
+		}
+		if stmt.Limit != nil && *stmt.Limit <= 0 {
+			return fmt.Errorf("%s: LIMIT must be positive", q.Name)
+		}
+		return nil
+	}
+	if stmt.Limit != nil || q.Annotations.Limit != nil || q.Annotations.NoLimit {
+		return fmt.Errorf("%s: limit annotations only valid for :many", q.Name)
 	}
 	return nil
 }
