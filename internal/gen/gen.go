@@ -802,6 +802,9 @@ func lowerCamel(s string) string {
 		return s
 	}
 	uc := upperCamel(s)
+	if uc == "" {
+		return ""
+	}
 	return strings.ToLower(uc[:1]) + uc[1:]
 }
 
