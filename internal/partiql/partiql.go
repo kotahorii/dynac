@@ -183,20 +183,16 @@ type parser struct {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
-	if p.matchKeyword("SELECT") {
-		p.pos++
+	if p.consumeKeyword("SELECT") {
 		return p.parseSelect()
 	}
-	if p.matchKeyword("INSERT") {
-		p.pos++
+	if p.consumeKeyword("INSERT") {
 		return p.parseInsert()
 	}
-	if p.matchKeyword("UPDATE") {
-		p.pos++
+	if p.consumeKeyword("UPDATE") {
 		return p.parseUpdate()
 	}
-	if p.matchKeyword("DELETE") {
-		p.pos++
+	if p.consumeKeyword("DELETE") {
 		return p.parseDelete()
 	}
 	return nil, p.errorAt("expected SELECT/INSERT/UPDATE/DELETE")
@@ -360,8 +356,7 @@ func (p *parser) parseWhere() ([]Cond, error) {
 }
 
 func (p *parser) parseCond() (Cond, error) {
-	if p.matchKeyword("begins_with") || p.matchKeyword("BEGINS_WITH") {
-		p.pos++
+	if p.consumeKeyword("begins_with") {
 		if !p.consumeSymbol("(") {
 			return Cond{}, p.errorAt("expected (")
 		}
