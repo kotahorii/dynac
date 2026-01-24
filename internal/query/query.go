@@ -433,11 +433,11 @@ func validateUpdate(q Query, stmt partiql.UpdateStmt, opts ValidateOptions) erro
 	if q.Kind != KindExec && q.Kind != KindOne {
 		return fmt.Errorf("%s: UPDATE must be :exec or :one", q.Name)
 	}
-	if err := validateSetClauses(q, stmt.Set); err != nil {
-		return err
-	}
 	pk, sk, err := resolveKeys(q, opts)
 	if err != nil {
+		return err
+	}
+	if err := validateSetClauses(q, stmt.Set, pk, sk); err != nil {
 		return err
 	}
 	conds, err := condMap(stmt.Where)
@@ -488,12 +488,22 @@ func validateWriteBase(q Query, table string, opts ValidateOptions) error {
 	return checkTable(table, opts.Table)
 }
 
-func validateSetClauses(q Query, clauses []partiql.SetClause) error {
+func validateSetClauses(q Query, clauses []partiql.SetClause, pk, sk []string) error {
 	if len(clauses) == 0 {
 		return fmt.Errorf("%s: UPDATE requires SET", q.Name)
 	}
+	keyAttrs := map[string]bool{}
+	for _, attr := range pk {
+		keyAttrs[attr] = true
+	}
+	for _, attr := range sk {
+		keyAttrs[attr] = true
+	}
 	seen := map[string]bool{}
 	for _, clause := range clauses {
+		if keyAttrs[clause.Attr] {
+			return fmt.Errorf("%s: UPDATE cannot SET key attribute %s", q.Name, clause.Attr)
+		}
 		if seen[clause.Attr] {
 			return fmt.Errorf("%s: duplicate SET attribute %s", q.Name, clause.Attr)
 		}

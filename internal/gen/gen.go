@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
+	"go/token"
 	"path"
 	"regexp"
 	"sort"
@@ -228,7 +229,7 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 
 func (g *Generator) generateInsert(q query.Query, stmt partiql.InsertStmt, modelName string) (string, error) {
 	_ = stmt
-	paramName := lowerCamel(modelName)
+	paramName := safeLowerCamel(modelName)
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "// %s :%s\n", q.Name, kindString(q.Kind))
 	fmt.Fprintf(&buf, "func (q *Queries) %s(ctx context.Context, %s %s) error {\n", q.Name, paramName, modelName)
@@ -470,7 +471,7 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 	paramNames := map[string]bool{}
 	params := []param{}
 	for _, attr := range pk {
-		pname := uniqueName(lowerCamel(attr), paramNames)
+		pname := uniqueName(safeLowerCamel(attr), paramNames)
 		paramNames[pname] = true
 		goType, ok := g.Models.FieldType(modelName, attr)
 		if !ok {
@@ -491,23 +492,23 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 		}
 		switch cond.Type {
 		case partiql.CondEq:
-			pname := uniqueName(lowerCamel(attr), paramNames)
+			pname := uniqueName(safeLowerCamel(attr), paramNames)
 			paramNames[pname] = true
 			idx := len(params)
 			params = append(params, param{Name: pname, Type: goType})
 			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamIdx: []int{idx}})
 		case partiql.CondBeginsWith:
-			pname := uniqueName(lowerCamel(attr)+"Prefix", paramNames)
+			pname := uniqueName(safeLowerCamel(attr)+"Prefix", paramNames)
 			paramNames[pname] = true
 			idx := len(params)
 			params = append(params, param{Name: pname, Type: goType})
 			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBeginsWith, ParamIdx: []int{idx}})
 			return keyConds, params, nil
 		case partiql.CondBetween:
-			pfrom := uniqueName(lowerCamel(attr)+"From", paramNames)
+			pfrom := uniqueName(safeLowerCamel(attr)+"From", paramNames)
 			paramNames[pfrom] = true
 			fromIdx := len(params)
-			pto := uniqueName(lowerCamel(attr)+"To", paramNames)
+			pto := uniqueName(safeLowerCamel(attr)+"To", paramNames)
 			paramNames[pto] = true
 			params = append(params, param{Name: pfrom, Type: goType}, param{Name: pto, Type: goType})
 			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBetween, ParamIdx: []int{fromIdx, fromIdx + 1}})
@@ -521,7 +522,7 @@ func (g *Generator) buildKeyParams(modelName string, pk, sk []string) ([]param, 
 	paramNames := map[string]bool{}
 	params := []param{}
 	for _, attr := range append(append([]string{}, pk...), sk...) {
-		pname := uniqueName(lowerCamel(attr), paramNames)
+		pname := uniqueName(safeLowerCamel(attr), paramNames)
 		paramNames[pname] = true
 		goType, ok := g.Models.FieldType(modelName, attr)
 		if !ok {
@@ -805,9 +806,49 @@ func lowerCamel(s string) string {
 }
 
 func splitIdent(s string) []string {
-	s = strings.ReplaceAll(s, "-", "_")
-	parts := strings.Split(s, "_")
-	return parts
+	if s == "" {
+		return nil
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r > 127 {
+			b.WriteByte('_')
+			continue
+		}
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	cleaned := strings.Trim(b.String(), "_")
+	if cleaned == "" {
+		return []string{""}
+	}
+	return strings.Split(cleaned, "_")
+}
+
+func safeLowerCamel(s string) string {
+	name := lowerCamel(s)
+	if name == "" {
+		return "v"
+	}
+	if !isIdentStart(name[0]) || token.IsKeyword(name) {
+		return "v" + strings.ToUpper(name[:1]) + name[1:]
+	}
+	return name
+}
+
+func isIdentStart(b byte) bool {
+	return b == '_' || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }
 
 var pkgAliasRe = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.`)

@@ -100,6 +100,24 @@ RETURNING UPDATED NEW *`,
 			options: ValidateOptions{Table: "App", PK: "pk", SK: "sk"},
 		},
 		{
+			name: "update cannot set pk",
+			content: `-- name: UpdateUser :exec
+UPDATE "App"
+SET pk = ?
+WHERE pk = ? AND sk = ?`,
+			wantErr: "cannot SET key attribute pk",
+			options: ValidateOptions{Table: "App", PK: "pk", SK: "sk"},
+		},
+		{
+			name: "update cannot set sk",
+			content: `-- name: UpdateUser :exec
+UPDATE "App"
+SET sk = ?
+WHERE pk = ? AND sk = ?`,
+			wantErr: "cannot SET key attribute sk",
+			options: ValidateOptions{Table: "App", PK: "pk", SK: "sk"},
+		},
+		{
 			name: "delete one requires returning",
 			content: `-- name: DeleteUser :one
 DELETE FROM "App"

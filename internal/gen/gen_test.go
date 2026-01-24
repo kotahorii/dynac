@@ -84,3 +84,29 @@ WHERE pk = ? AND sk = ?`)
 		}
 	}
 }
+
+func TestBuildKeyParamsSanitizesNames(t *testing.T) {
+	modelPath := writeTempFile(t, "models.go", `package ddb
+
+type Item struct {
+	Type  string `+"`"+`dynamodbav:"type"`+"`"+`
+	First string `+"`"+`dynamodbav:"1st"`+"`"+`
+}`)
+
+	models, err := model.Parse([]string{modelPath})
+	if err != nil {
+		t.Fatalf("parse models: %v", err)
+	}
+
+	g := Generator{Models: models}
+	params, err := g.buildKeyParams("Item", []string{"type"}, []string{"1st"})
+	if err != nil {
+		t.Fatalf("build params: %v", err)
+	}
+	if got := params[0].Name; got != "vType" {
+		t.Fatalf("param name for type = %q, want %q", got, "vType")
+	}
+	if got := params[1].Name; got != "v1st" {
+		t.Fatalf("param name for 1st = %q, want %q", got, "v1st")
+	}
+}
