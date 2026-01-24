@@ -308,25 +308,16 @@ func (q Query) Validate(opts ValidateOptions) error {
 	case partiql.SelectStmt:
 		return validateSelect(q, stmt, opts)
 	case partiql.InsertStmt:
-		if err := ensureNoSelectAnnotations(q); err != nil {
-			return err
-		}
 		if q.Kind != KindExec {
 			return fmt.Errorf("%s: INSERT must be :exec", q.Name)
 		}
-		if err := checkTable(stmt.Table, opts.Table); err != nil {
+		if err := validateWriteBase(q, stmt.Table, opts); err != nil {
 			return err
 		}
 		return nil
 	case partiql.UpdateStmt:
-		if err := ensureNoSelectAnnotations(q); err != nil {
-			return err
-		}
 		return validateUpdate(q, stmt, opts)
 	case partiql.DeleteStmt:
-		if err := ensureNoSelectAnnotations(q); err != nil {
-			return err
-		}
 		return validateDelete(q, stmt, opts)
 	default:
 		return fmt.Errorf("%s: unsupported statement", q.Name)
@@ -404,7 +395,7 @@ func ensureNoSelectAnnotations(q Query) error {
 }
 
 func validateUpdate(q Query, stmt partiql.UpdateStmt, opts ValidateOptions) error {
-	if err := checkTable(stmt.Table, opts.Table); err != nil {
+	if err := validateWriteBase(q, stmt.Table, opts); err != nil {
 		return err
 	}
 	if q.Kind == KindExec && stmt.Returning != nil {
@@ -434,7 +425,7 @@ func validateUpdate(q Query, stmt partiql.UpdateStmt, opts ValidateOptions) erro
 }
 
 func validateDelete(q Query, stmt partiql.DeleteStmt, opts ValidateOptions) error {
-	if err := checkTable(stmt.Table, opts.Table); err != nil {
+	if err := validateWriteBase(q, stmt.Table, opts); err != nil {
 		return err
 	}
 	if q.Kind == KindExec && stmt.Returning != nil {
@@ -462,6 +453,13 @@ func validateDelete(q Query, stmt partiql.DeleteStmt, opts ValidateOptions) erro
 		return err
 	}
 	return nil
+}
+
+func validateWriteBase(q Query, table string, opts ValidateOptions) error {
+	if err := ensureNoSelectAnnotations(q); err != nil {
+		return err
+	}
+	return checkTable(table, opts.Table)
 }
 
 func validateSetClauses(q Query, clauses []partiql.SetClause) error {
