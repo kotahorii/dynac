@@ -60,7 +60,7 @@ func invalidErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("%w: %v", ErrInvalid, err)
+	return fmt.Errorf("%w: %w", ErrInvalid, err)
 }
 
 func normalizeError(err error) error {

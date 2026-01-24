@@ -6,7 +6,10 @@ run:
 linters:
   default: none
   enable:
+    - copyloopvar
     - errcheck
+    - errorlint
+    - errname
     - govet
     - ineffassign
     - staticcheck
