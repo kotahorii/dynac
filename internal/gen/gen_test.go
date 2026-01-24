@@ -132,3 +132,25 @@ type Item struct {
 		t.Fatalf("param name for non-ascii = %q, want %q", got, "v")
 	}
 }
+
+func TestBuildKeyParamsHandlesSymbolOnly(t *testing.T) {
+	modelPath := writeTempFile(t, "models.go", `package ddb
+
+type Item struct {
+	Weird string `+"`"+`dynamodbav:"--"`+"`"+`
+}`)
+
+	models, err := model.Parse([]string{modelPath})
+	if err != nil {
+		t.Fatalf("parse models: %v", err)
+	}
+
+	g := Generator{Models: models}
+	params, err := g.buildKeyParams("Item", []string{"--"}, nil)
+	if err != nil {
+		t.Fatalf("build params: %v", err)
+	}
+	if got := params[0].Name; got != "v" {
+		t.Fatalf("param name for symbol-only = %q, want %q", got, "v")
+	}
+}
