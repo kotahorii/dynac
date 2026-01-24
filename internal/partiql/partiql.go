@@ -1,0 +1,537 @@
+package partiql
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"unicode"
+)
+
+type Statement interface {
+	stmtKind() string
+}
+
+type SelectStmt struct {
+	Table string
+	Where []Cond
+	Limit *int
+}
+
+func (SelectStmt) stmtKind() string { return "select" }
+
+type InsertStmt struct {
+	Table string
+}
+
+func (InsertStmt) stmtKind() string { return "insert" }
+
+type UpdateStmt struct {
+	Table     string
+	Set       []SetClause
+	Where     []Cond
+	Returning *Returning
+}
+
+func (UpdateStmt) stmtKind() string { return "update" }
+
+type DeleteStmt struct {
+	Table     string
+	Where     []Cond
+	Returning *Returning
+}
+
+func (DeleteStmt) stmtKind() string { return "delete" }
+
+type CondType int
+
+const (
+	CondEq CondType = iota
+	CondBeginsWith
+	CondBetween
+)
+
+type Cond struct {
+	Type CondType
+	Attr string
+}
+
+type SetClause struct {
+	Attr string
+}
+
+type ReturnMode int
+
+const (
+	ReturnAllOld ReturnMode = iota
+	ReturnAllNew
+	ReturnUpdatedOld
+	ReturnUpdatedNew
+)
+
+type Returning struct {
+	Mode ReturnMode
+}
+
+type tokenKind int
+
+const (
+	tokIdent tokenKind = iota
+	tokNumber
+	tokSymbol
+	tokOperator
+	tokPlaceholder
+	tokEOF
+)
+
+type token struct {
+	kind  tokenKind
+	value string
+	pos   int
+}
+
+func Parse(sql string) (Statement, error) {
+	l := lexer{src: sql}
+	toks, err := l.lex()
+	if err != nil {
+		return nil, err
+	}
+	p := parser{tokens: toks}
+	return p.parseStatement()
+}
+
+type lexer struct {
+	src string
+	pos int
+}
+
+func (l *lexer) lex() ([]token, error) {
+	var toks []token
+	for {
+		l.skipWS()
+		if l.pos >= len(l.src) {
+			toks = append(toks, token{kind: tokEOF, pos: l.pos})
+			return toks, nil
+		}
+		ch := l.src[l.pos]
+		switch {
+		case ch == '?':
+			toks = append(toks, token{kind: tokPlaceholder, value: "?", pos: l.pos})
+			l.pos++
+		case ch == '"':
+			start := l.pos + 1
+			l.pos++
+			for l.pos < len(l.src) && l.src[l.pos] != '"' {
+				l.pos++
+			}
+			if l.pos >= len(l.src) {
+				return nil, fmt.Errorf("unterminated quoted identifier")
+			}
+			val := l.src[start:l.pos]
+			l.pos++
+			toks = append(toks, token{kind: tokIdent, value: val, pos: start - 1})
+		case unicode.IsLetter(rune(ch)) || ch == '_':
+			start := l.pos
+			l.pos++
+			for l.pos < len(l.src) {
+				r := rune(l.src[l.pos])
+				if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+					l.pos++
+					continue
+				}
+				break
+			}
+			val := l.src[start:l.pos]
+			toks = append(toks, token{kind: tokIdent, value: val, pos: start})
+		case unicode.IsDigit(rune(ch)):
+			start := l.pos
+			l.pos++
+			for l.pos < len(l.src) && unicode.IsDigit(rune(l.src[l.pos])) {
+				l.pos++
+			}
+			val := l.src[start:l.pos]
+			toks = append(toks, token{kind: tokNumber, value: val, pos: start})
+		case strings.ContainsRune("(),*", rune(ch)):
+			toks = append(toks, token{kind: tokSymbol, value: string(ch), pos: l.pos})
+			l.pos++
+		case strings.ContainsRune("=<>!", rune(ch)):
+			start := l.pos
+			l.pos++
+			if l.pos < len(l.src) && (l.src[l.pos] == '=' || (l.src[start] == '<' && l.src[l.pos] == '>')) {
+				l.pos++
+			}
+			val := l.src[start:l.pos]
+			toks = append(toks, token{kind: tokOperator, value: val, pos: start})
+		default:
+			return nil, fmt.Errorf("unexpected character: %q", ch)
+		}
+	}
+}
+
+func (l *lexer) skipWS() {
+	for l.pos < len(l.src) {
+		if unicode.IsSpace(rune(l.src[l.pos])) {
+			l.pos++
+			continue
+		}
+		return
+	}
+}
+
+type parser struct {
+	tokens []token
+	pos    int
+}
+
+func (p *parser) parseStatement() (Statement, error) {
+	if p.matchKeyword("SELECT") {
+		p.pos++
+		return p.parseSelect()
+	}
+	if p.matchKeyword("INSERT") {
+		p.pos++
+		return p.parseInsert()
+	}
+	if p.matchKeyword("UPDATE") {
+		p.pos++
+		return p.parseUpdate()
+	}
+	if p.matchKeyword("DELETE") {
+		p.pos++
+		return p.parseDelete()
+	}
+	return nil, p.errorAt("expected SELECT/INSERT/UPDATE/DELETE")
+}
+
+func (p *parser) parseSelect() (Statement, error) {
+	if !p.consumeSymbol("*") {
+		return nil, p.errorAt("only SELECT * is supported")
+	}
+	if !p.consumeKeyword("FROM") {
+		return nil, p.errorAt("expected FROM")
+	}
+	table, err := p.parseIdent()
+	if err != nil {
+		return nil, err
+	}
+	if !p.consumeKeyword("WHERE") {
+		return nil, p.errorAt("expected WHERE")
+	}
+	conds, err := p.parseWhere()
+	if err != nil {
+		return nil, err
+	}
+	var limit *int
+	if p.consumeKeyword("LIMIT") {
+		n, err := p.parseNumber()
+		if err != nil {
+			return nil, err
+		}
+		limit = &n
+	}
+	if !p.atEnd() {
+		return nil, p.errorAt("unexpected tokens after SELECT")
+	}
+	return SelectStmt{Table: table, Where: conds, Limit: limit}, nil
+}
+
+func (p *parser) parseInsert() (Statement, error) {
+	if !p.consumeKeyword("INTO") {
+		return nil, p.errorAt("expected INTO")
+	}
+	table, err := p.parseIdent()
+	if err != nil {
+		return nil, err
+	}
+	if !p.consumeKeyword("VALUE") {
+		return nil, p.errorAt("expected VALUE")
+	}
+	if !p.consumePlaceholder() {
+		return nil, p.errorAt("expected ? placeholder")
+	}
+	if !p.atEnd() {
+		return nil, p.errorAt("unexpected tokens after INSERT")
+	}
+	return InsertStmt{Table: table}, nil
+}
+
+func (p *parser) parseUpdate() (Statement, error) {
+	table, err := p.parseIdent()
+	if err != nil {
+		return nil, err
+	}
+	if !p.consumeKeyword("SET") {
+		return nil, p.errorAt("expected SET")
+	}
+	setClauses, err := p.parseSetClauses()
+	if err != nil {
+		return nil, err
+	}
+	if !p.consumeKeyword("WHERE") {
+		return nil, p.errorAt("expected WHERE")
+	}
+	conds, err := p.parseWhere()
+	if err != nil {
+		return nil, err
+	}
+	var ret *Returning
+	if p.consumeKeyword("RETURNING") {
+		ret, err = p.parseReturning()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !p.atEnd() {
+		return nil, p.errorAt("unexpected tokens after UPDATE")
+	}
+	return UpdateStmt{Table: table, Set: setClauses, Where: conds, Returning: ret}, nil
+}
+
+func (p *parser) parseDelete() (Statement, error) {
+	if !p.consumeKeyword("FROM") {
+		return nil, p.errorAt("expected FROM")
+	}
+	table, err := p.parseIdent()
+	if err != nil {
+		return nil, err
+	}
+	if !p.consumeKeyword("WHERE") {
+		return nil, p.errorAt("expected WHERE")
+	}
+	conds, err := p.parseWhere()
+	if err != nil {
+		return nil, err
+	}
+	var ret *Returning
+	if p.consumeKeyword("RETURNING") {
+		ret, err = p.parseReturning()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !p.atEnd() {
+		return nil, p.errorAt("unexpected tokens after DELETE")
+	}
+	return DeleteStmt{Table: table, Where: conds, Returning: ret}, nil
+}
+
+func (p *parser) parseSetClauses() ([]SetClause, error) {
+	var clauses []SetClause
+	for {
+		attr, err := p.parseIdent()
+		if err != nil {
+			return nil, err
+		}
+		if !p.consumeOperator("=") {
+			return nil, p.errorAt("expected = in SET clause")
+		}
+		if !p.consumePlaceholder() {
+			return nil, p.errorAt("expected ? placeholder in SET")
+		}
+		clauses = append(clauses, SetClause{Attr: attr})
+		if p.consumeSymbol(",") {
+			continue
+		}
+		return clauses, nil
+	}
+}
+
+func (p *parser) parseWhere() ([]Cond, error) {
+	var conds []Cond
+	cond, err := p.parseCond()
+	if err != nil {
+		return nil, err
+	}
+	conds = append(conds, cond)
+	for {
+		if p.consumeKeyword("AND") {
+			cond, err = p.parseCond()
+			if err != nil {
+				return nil, err
+			}
+			conds = append(conds, cond)
+			continue
+		}
+		if p.consumeKeyword("OR") || p.consumeKeyword("NOT") {
+			return nil, p.errorAt("OR/NOT is not supported")
+		}
+		break
+	}
+	return conds, nil
+}
+
+func (p *parser) parseCond() (Cond, error) {
+	if p.matchKeyword("begins_with") || p.matchKeyword("BEGINS_WITH") {
+		p.pos++
+		if !p.consumeSymbol("(") {
+			return Cond{}, p.errorAt("expected (")
+		}
+		attr, err := p.parseIdent()
+		if err != nil {
+			return Cond{}, err
+		}
+		if !p.consumeSymbol(",") {
+			return Cond{}, p.errorAt("expected ,")
+		}
+		if !p.consumePlaceholder() {
+			return Cond{}, p.errorAt("expected ? placeholder")
+		}
+		if !p.consumeSymbol(")") {
+			return Cond{}, p.errorAt("expected )")
+		}
+		return Cond{Type: CondBeginsWith, Attr: attr}, nil
+	}
+	attr, err := p.parseIdent()
+	if err != nil {
+		return Cond{}, err
+	}
+	if p.consumeKeyword("IN") {
+		return Cond{}, p.errorAt("IN is not supported")
+	}
+	if p.consumeKeyword("BETWEEN") {
+		if !p.consumePlaceholder() {
+			return Cond{}, p.errorAt("expected ? placeholder")
+		}
+		if !p.consumeKeyword("AND") {
+			return Cond{}, p.errorAt("expected AND in BETWEEN")
+		}
+		if !p.consumePlaceholder() {
+			return Cond{}, p.errorAt("expected ? placeholder")
+		}
+		return Cond{Type: CondBetween, Attr: attr}, nil
+	}
+	if p.consumeOperator("=") {
+		if !p.consumePlaceholder() {
+			return Cond{}, p.errorAt("expected ? placeholder")
+		}
+		return Cond{Type: CondEq, Attr: attr}, nil
+	}
+	if p.peekOperator() {
+		return Cond{}, p.errorAt("unsupported operator")
+	}
+	return Cond{}, p.errorAt("expected condition")
+}
+
+func (p *parser) parseReturning() (*Returning, error) {
+	modeAll := p.consumeKeyword("ALL")
+	modeUpdated := p.consumeKeyword("UPDATED")
+	if !modeAll && !modeUpdated {
+		return nil, p.errorAt("expected ALL or UPDATED")
+	}
+	if p.consumeKeyword("OLD") {
+		p.consumeSymbol("*")
+		if modeAll {
+			return &Returning{Mode: ReturnAllOld}, nil
+		}
+		return &Returning{Mode: ReturnUpdatedOld}, nil
+	}
+	if p.consumeKeyword("NEW") {
+		p.consumeSymbol("*")
+		if modeAll {
+			return &Returning{Mode: ReturnAllNew}, nil
+		}
+		return &Returning{Mode: ReturnUpdatedNew}, nil
+	}
+	return nil, p.errorAt("expected OLD or NEW")
+}
+
+func (p *parser) parseIdent() (string, error) {
+	if p.atEnd() {
+		return "", p.errorAt("expected identifier")
+	}
+	tok := p.tokens[p.pos]
+	if tok.kind != tokIdent {
+		return "", p.errorAt("expected identifier")
+	}
+	p.pos++
+	return tok.value, nil
+}
+
+func (p *parser) parseNumber() (int, error) {
+	if p.atEnd() {
+		return 0, p.errorAt("expected number")
+	}
+	tok := p.tokens[p.pos]
+	if tok.kind != tokNumber {
+		return 0, p.errorAt("expected number")
+	}
+	p.pos++
+	val, err := strconv.Atoi(tok.value)
+	if err != nil {
+		return 0, p.errorAt("invalid number")
+	}
+	return val, nil
+}
+
+func (p *parser) consumeKeyword(word string) bool {
+	if p.matchKeyword(word) {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+func (p *parser) matchKeyword(word string) bool {
+	if p.atEnd() {
+		return false
+	}
+	tok := p.tokens[p.pos]
+	if tok.kind != tokIdent {
+		return false
+	}
+	return strings.EqualFold(tok.value, word)
+}
+
+func (p *parser) consumeSymbol(sym string) bool {
+	if p.atEnd() {
+		return false
+	}
+	tok := p.tokens[p.pos]
+	if tok.kind == tokSymbol && tok.value == sym {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+func (p *parser) consumeOperator(op string) bool {
+	if p.atEnd() {
+		return false
+	}
+	tok := p.tokens[p.pos]
+	if tok.kind == tokOperator && tok.value == op {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+func (p *parser) consumePlaceholder() bool {
+	if p.atEnd() {
+		return false
+	}
+	tok := p.tokens[p.pos]
+	if tok.kind == tokPlaceholder {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+func (p *parser) peekOperator() bool {
+	if p.atEnd() {
+		return false
+	}
+	return p.tokens[p.pos].kind == tokOperator
+}
+
+func (p *parser) atEnd() bool {
+	return p.tokens[p.pos].kind == tokEOF
+}
+
+func (p *parser) errorAt(msg string) error {
+	if p.atEnd() {
+		return fmt.Errorf("%s at end", msg)
+	}
+	tok := p.tokens[p.pos]
+	return fmt.Errorf("%s near %q", msg, tok.value)
+}
