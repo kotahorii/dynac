@@ -823,8 +823,8 @@ func deriveModelName(queryName string) string {
 	name := queryName
 	prefixes := []string{"BatchDelete", "BatchPut", "BatchGet", "Create", "Update", "Delete", "Get", "List", "Put"}
 	for _, p := range prefixes {
-		if strings.HasPrefix(name, p) {
-			name = strings.TrimPrefix(name, p)
+		if after, ok := strings.CutPrefix(name, p); ok {
+			name = after
 			break
 		}
 	}

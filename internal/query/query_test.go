@@ -19,10 +19,10 @@ func writeQueryFile(t *testing.T, content string) string {
 
 func TestValidateQueries(t *testing.T) {
 	cases := []struct {
-		name     string
-		content  string
-		wantErr  string
-		options  ValidateOptions
+		name    string
+		content string
+		wantErr string
+		options ValidateOptions
 	}{
 		{
 			name: "valid one",
@@ -118,7 +118,6 @@ WHERE pk = ?`,
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeQueryFile(t, tc.content)
 			qs, err := LoadFile(path)

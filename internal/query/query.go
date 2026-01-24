@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,8 +126,8 @@ func LoadFile(path string) ([]Query, error) {
 	for i, line := range lines {
 		lineNo := i + 1
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "--") {
-			body := strings.TrimSpace(strings.TrimPrefix(trimmed, "--"))
+		if after, ok := strings.CutPrefix(trimmed, "--"); ok {
+			body := strings.TrimSpace(after)
 			if strings.HasPrefix(body, "name:") {
 				if err := flush(); err != nil {
 					return nil, err
@@ -635,12 +636,7 @@ func validateKeyConditionsExact(q Query, conds map[string]partiql.Cond, pk, sk [
 }
 
 func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, s)
 }
 
 func hasLaterCond(conds map[string]partiql.Cond, later []string) bool {

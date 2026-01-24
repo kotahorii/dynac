@@ -42,6 +42,20 @@ func isConditionalFailed(err error) bool {
 	return errors.As(err, &ccfe)
 }
 
+func isNotFoundTable(err error) bool {
+	var rnfe *types.ResourceNotFoundException
+	return errors.As(err, &rnfe)
+}
+
+func isThrottled(err error) bool {
+	var pte *types.ProvisionedThroughputExceededException
+	if errors.As(err, &pte) {
+		return true
+	}
+	var te *types.ThrottlingException
+	return errors.As(err, &te)
+}
+
 func invalidErr(err error) error {
 	if err == nil {
 		return nil
@@ -53,16 +67,10 @@ func normalizeError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var rnfe *types.ResourceNotFoundException
-	if errors.As(err, &rnfe) {
+	if isNotFoundTable(err) {
 		return ErrNotFoundTable
 	}
-	var pte *types.ProvisionedThroughputExceededException
-	if errors.As(err, &pte) {
-		return ErrThrottled
-	}
-	var te *types.ThrottlingException
-	if errors.As(err, &te) {
+	if isThrottled(err) {
 		return ErrThrottled
 	}
 	return err
