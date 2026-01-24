@@ -26,10 +26,10 @@ func TestGenerate(t *testing.T) {
 import t "time"
 
 type User struct {
-	PK        string ` + "`" + `dynamodbav:"pk"` + "`" + `
-	SK        string ` + "`" + `dynamodbav:"sk"` + "`" + `
-	UserName  string ` + "`" + `dynamodbav:"user_name"` + "`" + `
-	CreatedAt t.Time ` + "`" + `dynamodbav:"created_at"` + "`" + `
+	PK        string `+"`"+`dynamodbav:"pk"`+"`"+`
+	SK        string `+"`"+`dynamodbav:"sk"`+"`"+`
+	UserName  string `+"`"+`dynamodbav:"user_name"`+"`"+`
+	CreatedAt t.Time `+"`"+`dynamodbav:"created_at"`+"`"+`
 }`)
 
 	queryPath := writeTempFile(t, "queries.partiql", `-- name: GetUser :one
