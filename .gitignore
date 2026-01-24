@@ -1,6 +1,10 @@
 # Design docs (not committed)
 /docs/plan/
 
+# Agent configs (not committed)
+/agents/
+/AGENTS.md
+
 # Go binaries and artifacts
 *.exe
 *.exe~
