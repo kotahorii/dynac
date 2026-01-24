@@ -641,12 +641,16 @@ func (g *Generator) collectImports(queries []query.Query) ([]importSpec, error) 
 	imports := map[string]string{
 		"context":  "context",
 		"dynamodb": "github.com/aws/aws-sdk-go-v2/service/dynamodb",
-		"types":    "github.com/aws/aws-sdk-go-v2/service/dynamodb/types",
 	}
+	needsTypes := false
 	for _, q := range queries {
 		modelName, err := g.modelNameForQuery(q)
 		if err != nil {
 			return nil, err
+		}
+		switch q.Stmt.(type) {
+		case partiql.SelectStmt, partiql.UpdateStmt, partiql.DeleteStmt:
+			needsTypes = true
 		}
 		for _, attrType := range g.attrTypesForQuery(q, modelName) {
 			for _, alias := range extractPkgAliases(attrType) {
@@ -657,6 +661,9 @@ func (g *Generator) collectImports(queries []query.Query) ([]importSpec, error) 
 				imports[alias] = path
 			}
 		}
+	}
+	if needsTypes {
+		imports["types"] = "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	}
 	var list []importSpec
 	for alias, path := range imports {

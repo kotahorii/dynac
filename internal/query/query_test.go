@@ -90,6 +90,16 @@ RETURNING ALL NEW *`,
 			options: ValidateOptions{Table: "App", PK: "pk", SK: "sk"},
 		},
 		{
+			name: "update one requires all returning",
+			content: `-- name: UpdateUser :one
+UPDATE "App"
+SET user_name = ?
+WHERE pk = ? AND sk = ?
+RETURNING UPDATED NEW *`,
+			wantErr: "requires RETURNING ALL OLD/NEW",
+			options: ValidateOptions{Table: "App", PK: "pk", SK: "sk"},
+		},
+		{
 			name: "delete one requires returning",
 			content: `-- name: DeleteUser :one
 DELETE FROM "App"

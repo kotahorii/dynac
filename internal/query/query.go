@@ -57,12 +57,19 @@ type ValidateOptions struct {
 
 func LoadFiles(paths []string) ([]Query, error) {
 	var all []Query
+	seen := map[string]Query{}
 	for _, path := range paths {
 		qs, err := LoadFile(path)
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, qs...)
+		for _, q := range qs {
+			if prev, ok := seen[q.Name]; ok {
+				return nil, fmt.Errorf("%s:%d: duplicate query name %s (also in %s:%d)", q.File, q.Line, q.Name, prev.File, prev.Line)
+			}
+			seen[q.Name] = q
+			all = append(all, q)
+		}
 	}
 	return all, nil
 }
@@ -417,6 +424,11 @@ func validateUpdate(q Query, stmt partiql.UpdateStmt, opts ValidateOptions) erro
 	}
 	if q.Kind == KindOne && stmt.Returning == nil {
 		return fmt.Errorf("%s: :one UPDATE requires RETURNING", q.Name)
+	}
+	if q.Kind == KindOne && stmt.Returning != nil {
+		if stmt.Returning.Mode != partiql.ReturnAllOld && stmt.Returning.Mode != partiql.ReturnAllNew {
+			return fmt.Errorf("%s: :one UPDATE requires RETURNING ALL OLD/NEW", q.Name)
+		}
 	}
 	if q.Kind != KindExec && q.Kind != KindOne {
 		return fmt.Errorf("%s: UPDATE must be :exec or :one", q.Name)
