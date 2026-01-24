@@ -37,6 +37,14 @@ func (q *Queries) marshalValue(v any) (types.AttributeValue, error) {
 
 func ptrBool(v bool) *bool { return &v }
 
+var (
+	// Referenced by generated code.
+	_ = (*Queries).marshal
+	_ = (*Queries).unmarshal
+	_ = (*Queries).marshalValue
+	_ = ptrBool
+)
+
 func isConditionalFailed(err error) bool {
 	var ccfe *types.ConditionalCheckFailedException
 	return errors.As(err, &ccfe)

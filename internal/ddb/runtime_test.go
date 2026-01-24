@@ -21,7 +21,7 @@ func TestNormalizeError(t *testing.T) {
 		t.Fatalf("expected ErrThrottled from throttling error")
 	}
 	other := errors.New("other")
-	if normalizeError(other) != other {
+	if !errors.Is(normalizeError(other), other) {
 		t.Fatalf("expected original error")
 	}
 }

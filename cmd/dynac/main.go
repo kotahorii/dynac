@@ -47,26 +47,34 @@ func main() {
 	case "-h", "--help", "help":
 		usage()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
+		writef(os.Stderr, "unknown command: %s\n", os.Args[1])
 		usage()
 		os.Exit(2)
 	}
 }
 
+func writeLine(w io.Writer, line string) {
+	_, _ = fmt.Fprintln(w, line)
+}
+
+func writef(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "dynac - DynamoDB query code generator")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  dynac generate [flags]")
-	fmt.Fprintln(os.Stderr, "  dynac vet [flags]")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Flags:")
-	fmt.Fprintln(os.Stderr, "  --table   DynamoDB table name")
-	fmt.Fprintln(os.Stderr, "  --pkg     output package path (default internal/ddb)")
-	fmt.Fprintln(os.Stderr, "  --model   model file or directory (repeatable, generate only)")
-	fmt.Fprintln(os.Stderr, "  --pk      partition key name (default pk)")
-	fmt.Fprintln(os.Stderr, "  --sk      sort key name (default sk; set empty for single-key)")
-	fmt.Fprintln(os.Stderr, "  --queries query root (default queries)")
+	writeLine(os.Stderr, "dynac - DynamoDB query code generator")
+	writeLine(os.Stderr, "")
+	writeLine(os.Stderr, "Usage:")
+	writeLine(os.Stderr, "  dynac generate [flags]")
+	writeLine(os.Stderr, "  dynac vet [flags]")
+	writeLine(os.Stderr, "")
+	writeLine(os.Stderr, "Flags:")
+	writeLine(os.Stderr, "  --table   DynamoDB table name")
+	writeLine(os.Stderr, "  --pkg     output package path (default internal/ddb)")
+	writeLine(os.Stderr, "  --model   model file or directory (repeatable, generate only)")
+	writeLine(os.Stderr, "  --pk      partition key name (default pk)")
+	writeLine(os.Stderr, "  --sk      sort key name (default sk; set empty for single-key)")
+	writeLine(os.Stderr, "  --queries query root (default queries)")
 }
 
 func runGenerate(args []string, stderr io.Writer) int {
@@ -83,17 +91,17 @@ func runGenerate(args []string, stderr io.Writer) int {
 		return 2
 	}
 	if len(modelPaths) == 0 {
-		fmt.Fprintln(stderr, "--model is required for generate")
+		writeLine(stderr, "--model is required for generate")
 		return 2
 	}
 	queries, err := loadQueries(*queriesRoot)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeLine(stderr, err.Error())
 		return 1
 	}
 	models, err := model.Parse(modelPaths)
 	if err != nil {
-		fmt.Fprintf(stderr, "load models: %v\n", err)
+		writef(stderr, "load models: %v\n", err)
 		return 1
 	}
 	pkgName := filepath.Base(filepath.Clean(*pkgPath))
@@ -107,16 +115,16 @@ func runGenerate(args []string, stderr io.Writer) int {
 	}
 	out, err := gen.Generate(queries)
 	if err != nil {
-		fmt.Fprintf(stderr, "generate: %v\n", err)
+		writef(stderr, "generate: %v\n", err)
 		return 1
 	}
 	if err := os.MkdirAll(*pkgPath, 0o755); err != nil {
-		fmt.Fprintf(stderr, "mkdir: %v\n", err)
+		writef(stderr, "mkdir: %v\n", err)
 		return 1
 	}
 	outPath := filepath.Join(*pkgPath, "queries_gen.go")
 	if err := os.WriteFile(outPath, out, 0o644); err != nil {
-		fmt.Fprintf(stderr, "write: %v\n", err)
+		writef(stderr, "write: %v\n", err)
 		return 1
 	}
 	return 0
@@ -134,12 +142,12 @@ func runVet(args []string, stderr io.Writer) int {
 	}
 	queries, err := loadQueries(*queriesRoot)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		writeLine(stderr, err.Error())
 		return 1
 	}
 	for _, q := range queries {
 		if err := q.Validate(query.ValidateOptions{Table: *table, PK: *pk, SK: *sk}); err != nil {
-			fmt.Fprintf(stderr, "vet: %v\n", err)
+			writef(stderr, "vet: %v\n", err)
 			return 1
 		}
 	}

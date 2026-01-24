@@ -170,9 +170,10 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 		fmt.Fprintf(&buf, "\t\tIndexName: func() *string { v := %q; return &v }(),\n", q.Annotations.Index.Name)
 		fmt.Fprintf(&buf, "\t\tConsistentRead: ptrBool(false),\n")
 	}
-	if q.Kind == query.KindOne {
+	switch q.Kind {
+	case query.KindOne:
 		fmt.Fprintf(&buf, "\t\tLimit: &limit,\n")
-	} else if q.Kind == query.KindMany {
+	case query.KindMany:
 		limit := effectiveLimit(q, stmt)
 		if limit != nil {
 			fmt.Fprintf(&buf, "\t\tLimit: func() *int32 { v := int32(%d); return &v }(),\n", *limit)
