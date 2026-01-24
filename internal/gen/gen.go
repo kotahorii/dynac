@@ -55,9 +55,9 @@ type param struct {
 }
 
 type keyCond struct {
-	Attr       string
-	CondType   partiql.CondType
-	ParamNames []string
+	Attr     string
+	CondType partiql.CondType
+	ParamIdx []int
 }
 
 func (g *Generator) generateQuery(q query.Query) (string, error) {
@@ -145,7 +145,7 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 		fmt.Fprintf(&buf, "}\n")
 		return buf.String(), nil
 	}
-	nameMap, valMap, expr := buildKeyExpression(keyConds, params)
+	nameMap, valMap, expr := buildKeyExpression(keyConds)
 	fmt.Fprintf(&buf, "\tkeyCond := %q\n", expr)
 	fmt.Fprintf(&buf, "\texprNames := map[string]string{\n")
 	for _, name := range sortedKeys(nameMap) {
@@ -476,8 +476,9 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 		if !ok {
 			return nil, nil, fmt.Errorf("%s: model %s missing attribute %s", modelName, modelName, attr)
 		}
+		idx := len(params)
 		params = append(params, param{Name: pname, Type: goType})
-		keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamNames: []string{pname}})
+		keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamIdx: []int{idx}})
 	}
 	for _, attr := range sk {
 		cond, ok := conds[attr]
@@ -492,21 +493,24 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 		case partiql.CondEq:
 			pname := uniqueName(lowerCamel(attr), paramNames)
 			paramNames[pname] = true
+			idx := len(params)
 			params = append(params, param{Name: pname, Type: goType})
-			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamNames: []string{pname}})
+			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamIdx: []int{idx}})
 		case partiql.CondBeginsWith:
 			pname := uniqueName(lowerCamel(attr)+"Prefix", paramNames)
 			paramNames[pname] = true
+			idx := len(params)
 			params = append(params, param{Name: pname, Type: goType})
-			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBeginsWith, ParamNames: []string{pname}})
+			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBeginsWith, ParamIdx: []int{idx}})
 			return keyConds, params, nil
 		case partiql.CondBetween:
 			pfrom := uniqueName(lowerCamel(attr)+"From", paramNames)
 			paramNames[pfrom] = true
+			fromIdx := len(params)
 			pto := uniqueName(lowerCamel(attr)+"To", paramNames)
 			paramNames[pto] = true
 			params = append(params, param{Name: pfrom, Type: goType}, param{Name: pto, Type: goType})
-			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBetween, ParamNames: []string{pfrom, pto}})
+			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBetween, ParamIdx: []int{fromIdx, fromIdx + 1}})
 			return keyConds, params, nil
 		}
 	}
@@ -560,19 +564,14 @@ type setParam struct {
 	Type string
 }
 
-func buildKeyExpression(conds []keyCond, params []param) (map[string]string, map[string]string, string) {
+func buildKeyExpression(conds []keyCond) (map[string]string, map[string]string, string) {
 	attrAlias := map[string]string{}
 	valMap := map[string]string{}
-	paramIndex := map[string]int{}
-	for i, p := range params {
-		paramIndex[p.Name] = i
-	}
 	for _, cond := range conds {
 		if _, ok := attrAlias[cond.Attr]; !ok {
 			attrAlias[cond.Attr] = fmt.Sprintf("#n%d", len(attrAlias))
 		}
-		for _, pname := range cond.ParamNames {
-			idx := paramIndex[pname]
+		for _, idx := range cond.ParamIdx {
 			valMap[fmt.Sprintf(":v%d", idx)] = fmt.Sprintf("v%d", idx)
 		}
 	}
@@ -581,11 +580,11 @@ func buildKeyExpression(conds []keyCond, params []param) (map[string]string, map
 		alias := attrAlias[cond.Attr]
 		switch cond.CondType {
 		case partiql.CondEq:
-			parts = append(parts, fmt.Sprintf("%s = :v%d", alias, paramIndex[cond.ParamNames[0]]))
+			parts = append(parts, fmt.Sprintf("%s = :v%d", alias, cond.ParamIdx[0]))
 		case partiql.CondBeginsWith:
-			parts = append(parts, fmt.Sprintf("begins_with(%s, :v%d)", alias, paramIndex[cond.ParamNames[0]]))
+			parts = append(parts, fmt.Sprintf("begins_with(%s, :v%d)", alias, cond.ParamIdx[0]))
 		case partiql.CondBetween:
-			parts = append(parts, fmt.Sprintf("%s BETWEEN :v%d AND :v%d", alias, paramIndex[cond.ParamNames[0]], paramIndex[cond.ParamNames[1]]))
+			parts = append(parts, fmt.Sprintf("%s BETWEEN :v%d AND :v%d", alias, cond.ParamIdx[0], cond.ParamIdx[1]))
 		}
 	}
 	exprNames := invertAliasMap(attrAlias)
