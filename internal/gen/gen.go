@@ -58,7 +58,6 @@ type keyCond struct {
 	Attr       string
 	CondType   partiql.CondType
 	ParamNames []string
-	GoType     string
 }
 
 func (g *Generator) generateQuery(q query.Query) (string, error) {
@@ -149,8 +148,8 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 	nameMap, valMap, expr := buildKeyExpression(keyConds, params)
 	fmt.Fprintf(&buf, "\tkeyCond := %q\n", expr)
 	fmt.Fprintf(&buf, "\texprNames := map[string]string{\n")
-	for _, pair := range sortedAliasPairs(nameMap) {
-		fmt.Fprintf(&buf, "\t\t%q: %q,\n", pair.Alias, pair.Attr)
+	for _, name := range sortedKeys(nameMap) {
+		fmt.Fprintf(&buf, "\t\t%q: %q,\n", name, nameMap[name])
 	}
 	fmt.Fprintf(&buf, "\t}\n")
 	fmt.Fprintf(&buf, "\texprVals := map[string]types.AttributeValue{\n")
@@ -209,12 +208,12 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 	fmt.Fprintf(&buf, "\t\tif err != nil {\n")
 	fmt.Fprintf(&buf, "\t\t\treturn nil, normalizeError(err)\n")
 	fmt.Fprintf(&buf, "\t\t}\n")
-		fmt.Fprintf(&buf, "\t\tfor _, item := range page.Items {\n")
-		fmt.Fprintf(&buf, "\t\t\tvar row %s\n", returnType)
-		fmt.Fprintf(&buf, "\t\t\tif err := q.unmarshal(item, &row); err != nil {\n")
-		fmt.Fprintf(&buf, "\t\t\t\treturn nil, invalidErr(err)\n")
-		fmt.Fprintf(&buf, "\t\t\t}\n")
-		fmt.Fprintf(&buf, "\t\t\tres = append(res, row)\n")
+	fmt.Fprintf(&buf, "\t\tfor _, item := range page.Items {\n")
+	fmt.Fprintf(&buf, "\t\t\tvar row %s\n", returnType)
+	fmt.Fprintf(&buf, "\t\t\tif err := q.unmarshal(item, &row); err != nil {\n")
+	fmt.Fprintf(&buf, "\t\t\t\treturn nil, invalidErr(err)\n")
+	fmt.Fprintf(&buf, "\t\t\t}\n")
+	fmt.Fprintf(&buf, "\t\t\tres = append(res, row)\n")
 	if limit != nil {
 		fmt.Fprintf(&buf, "\t\t\tif int32(len(res)) >= max {\n")
 		fmt.Fprintf(&buf, "\t\t\t\treturn res[:max], nil\n")
@@ -332,9 +331,10 @@ func (g *Generator) generateUpdate(q query.Query, stmt partiql.UpdateStmt, model
 	}
 	fmt.Fprintf(&buf, "\"\n")
 	fmt.Fprintf(&buf, "\tcond := \"attribute_exists(%s)\"\n", alias[g.PK])
+	exprNames := invertAliasMap(alias)
 	fmt.Fprintf(&buf, "\texprNames := map[string]string{\n")
-	for _, pair := range sortedAliasPairs(alias) {
-		fmt.Fprintf(&buf, "\t\t%q: %q,\n", pair.Alias, pair.Attr)
+	for _, name := range sortedKeys(exprNames) {
+		fmt.Fprintf(&buf, "\t\t%q: %q,\n", name, exprNames[name])
 	}
 	fmt.Fprintf(&buf, "\t}\n")
 	fmt.Fprintf(&buf, "\texprVals := map[string]types.AttributeValue{\n")
@@ -477,7 +477,7 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 			return nil, nil, fmt.Errorf("%s: model %s missing attribute %s", modelName, modelName, attr)
 		}
 		params = append(params, param{Name: pname, Type: goType})
-		keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamNames: []string{pname}, GoType: goType})
+		keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamNames: []string{pname}})
 	}
 	for _, attr := range sk {
 		cond, ok := conds[attr]
@@ -493,12 +493,12 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 			pname := uniqueName(lowerCamel(attr), paramNames)
 			paramNames[pname] = true
 			params = append(params, param{Name: pname, Type: goType})
-			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamNames: []string{pname}, GoType: goType})
+			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamNames: []string{pname}})
 		case partiql.CondBeginsWith:
 			pname := uniqueName(lowerCamel(attr)+"Prefix", paramNames)
 			paramNames[pname] = true
 			params = append(params, param{Name: pname, Type: goType})
-			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBeginsWith, ParamNames: []string{pname}, GoType: goType})
+			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBeginsWith, ParamNames: []string{pname}})
 			return keyConds, params, nil
 		case partiql.CondBetween:
 			pfrom := uniqueName(lowerCamel(attr)+"From", paramNames)
@@ -506,7 +506,7 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 			pto := uniqueName(lowerCamel(attr)+"To", paramNames)
 			paramNames[pto] = true
 			params = append(params, param{Name: pfrom, Type: goType}, param{Name: pto, Type: goType})
-			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBetween, ParamNames: []string{pfrom, pto}, GoType: goType})
+			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBetween, ParamNames: []string{pfrom, pto}})
 			return keyConds, params, nil
 		}
 	}
@@ -588,7 +588,8 @@ func buildKeyExpression(conds []keyCond, params []param) (map[string]string, map
 			parts = append(parts, fmt.Sprintf("%s BETWEEN :v%d AND :v%d", alias, paramIndex[cond.ParamNames[0]], paramIndex[cond.ParamNames[1]]))
 		}
 	}
-	return attrAlias, valMap, strings.Join(parts, " AND ")
+	exprNames := invertAliasMap(attrAlias)
+	return exprNames, valMap, strings.Join(parts, " AND ")
 }
 
 func (g *Generator) resolveKeys(q query.Query) ([]string, []string, error) {
@@ -762,23 +763,12 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
-type aliasPair struct {
-	Alias string
-	Attr  string
-}
-
-func sortedAliasPairs(m map[string]string) []aliasPair {
-	pairs := make([]aliasPair, 0, len(m))
+func invertAliasMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
 	for attr, alias := range m {
-		pairs = append(pairs, aliasPair{Alias: alias, Attr: attr})
+		out[alias] = attr
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i].Alias == pairs[j].Alias {
-			return pairs[i].Attr < pairs[j].Attr
-		}
-		return pairs[i].Alias < pairs[j].Alias
-	})
-	return pairs
+	return out
 }
 
 func uniqueName(base string, used map[string]bool) string {
