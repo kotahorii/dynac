@@ -113,56 +113,35 @@ func (l *lexer) lex() ([]token, error) {
 			return toks, nil
 		}
 		ch := l.src[l.pos]
-		switch {
-		case ch == '?':
+		switch ch {
+		case '?':
 			toks = append(toks, token{kind: tokPlaceholder, value: "?", pos: l.pos})
 			l.pos++
-		case ch == '"':
-			start := l.pos + 1
-			l.pos++
-			for l.pos < len(l.src) && l.src[l.pos] != '"' {
-				l.pos++
+		case '"':
+			val, pos, err := l.readQuotedIdent()
+			if err != nil {
+				return nil, err
 			}
-			if l.pos >= len(l.src) {
-				return nil, fmt.Errorf("unterminated quoted identifier")
-			}
-			val := l.src[start:l.pos]
-			l.pos++
-			toks = append(toks, token{kind: tokIdent, value: val, pos: start - 1})
-		case unicode.IsLetter(rune(ch)) || ch == '_':
-			start := l.pos
-			l.pos++
-			for l.pos < len(l.src) {
-				r := rune(l.src[l.pos])
-				if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-					l.pos++
-					continue
-				}
-				break
-			}
-			val := l.src[start:l.pos]
-			toks = append(toks, token{kind: tokIdent, value: val, pos: start})
-		case unicode.IsDigit(rune(ch)):
-			start := l.pos
-			l.pos++
-			for l.pos < len(l.src) && unicode.IsDigit(rune(l.src[l.pos])) {
-				l.pos++
-			}
-			val := l.src[start:l.pos]
-			toks = append(toks, token{kind: tokNumber, value: val, pos: start})
-		case strings.ContainsRune("(),*", rune(ch)):
+			toks = append(toks, token{kind: tokIdent, value: val, pos: pos})
+		case '(', ')', ',', '*':
 			toks = append(toks, token{kind: tokSymbol, value: string(ch), pos: l.pos})
 			l.pos++
-		case strings.ContainsRune("=<>!", rune(ch)):
-			start := l.pos
-			l.pos++
-			if l.pos < len(l.src) && (l.src[l.pos] == '=' || (l.src[start] == '<' && l.src[l.pos] == '>')) {
-				l.pos++
-			}
-			val := l.src[start:l.pos]
-			toks = append(toks, token{kind: tokOperator, value: val, pos: start})
+		case '=', '<', '>', '!':
+			toks = append(toks, l.readOperator())
 		default:
-			return nil, fmt.Errorf("unexpected character: %q", ch)
+			r := rune(ch)
+			switch {
+			case isIdentStart(r):
+				start := l.pos
+				val := l.readWhile(isIdentPart)
+				toks = append(toks, token{kind: tokIdent, value: val, pos: start})
+			case unicode.IsDigit(r):
+				start := l.pos
+				val := l.readWhile(unicode.IsDigit)
+				toks = append(toks, token{kind: tokNumber, value: val, pos: start})
+			default:
+				return nil, fmt.Errorf("unexpected character: %q", ch)
+			}
 		}
 	}
 }
@@ -175,6 +154,48 @@ func (l *lexer) skipWS() {
 		}
 		return
 	}
+}
+
+func (l *lexer) readWhile(pred func(rune) bool) string {
+	start := l.pos
+	for l.pos < len(l.src) {
+		if !pred(rune(l.src[l.pos])) {
+			break
+		}
+		l.pos++
+	}
+	return l.src[start:l.pos]
+}
+
+func (l *lexer) readQuotedIdent() (string, int, error) {
+	start := l.pos
+	l.pos++
+	for l.pos < len(l.src) && l.src[l.pos] != '"' {
+		l.pos++
+	}
+	if l.pos >= len(l.src) {
+		return "", 0, fmt.Errorf("unterminated quoted identifier")
+	}
+	val := l.src[start+1 : l.pos]
+	l.pos++
+	return val, start, nil
+}
+
+func (l *lexer) readOperator() token {
+	start := l.pos
+	l.pos++
+	if l.pos < len(l.src) && (l.src[l.pos] == '=' || (l.src[start] == '<' && l.src[l.pos] == '>')) {
+		l.pos++
+	}
+	return token{kind: tokOperator, value: l.src[start:l.pos], pos: start}
+}
+
+func isIdentStart(r rune) bool {
+	return r == '_' || unicode.IsLetter(r)
+}
+
+func isIdentPart(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 type parser struct {
