@@ -30,6 +30,8 @@ go run ./cmd/dynac generate \
   --pkg ./examples/sample-app/internal/ddb
 ```
 
+This writes `queries_gen.go` and `runtime_gen.go` into `examples/sample-app/internal/ddb`.
+
 ## Run
 
 ```sh
