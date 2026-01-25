@@ -65,6 +65,24 @@ func (g *Generator) generateQuery(q query.Query) (string, error) {
 	if err := q.Validate(query.ValidateOptions{Table: g.Table, PK: g.PK, SK: g.SK}); err != nil {
 		return "", err
 	}
+	switch {
+	case isBatchPutQuery(q.Name):
+		if q.Kind != query.KindExec {
+			return "", fmt.Errorf("%s: BatchPut must be :exec", q.Name)
+		}
+		if _, ok := q.Stmt.(partiql.InsertStmt); !ok {
+			return "", fmt.Errorf("%s: BatchPut requires INSERT", q.Name)
+		}
+	case isBatchDeleteQuery(q.Name):
+		if q.Kind != query.KindExec {
+			return "", fmt.Errorf("%s: BatchDelete must be :exec", q.Name)
+		}
+		if _, ok := q.Stmt.(partiql.DeleteStmt); !ok {
+			return "", fmt.Errorf("%s: BatchDelete requires DELETE", q.Name)
+		}
+	case isBatchGetQuery(q.Name):
+		return "", fmt.Errorf("%s: BatchGet is not supported yet", q.Name)
+	}
 	modelName, err := g.modelNameForQuery(q)
 	if err != nil {
 		return "", err
@@ -230,6 +248,9 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 
 func (g *Generator) generateInsert(q query.Query, stmt partiql.InsertStmt, modelName string) (string, error) {
 	_ = stmt
+	if isBatchPutQuery(q.Name) {
+		return g.generateBatchPut(q, modelName)
+	}
 	paramName := safeLowerCamel(modelName)
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "// %s :%s\n", q.Name, kindString(q.Kind))
@@ -255,6 +276,29 @@ func (g *Generator) generateInsert(q query.Query, stmt partiql.InsertStmt, model
 	fmt.Fprintf(&buf, "\t\treturn ErrConflict\n")
 	fmt.Fprintf(&buf, "\t}\n")
 	fmt.Fprintf(&buf, "\treturn normalizeError(err)\n")
+	fmt.Fprintf(&buf, "}\n")
+	return buf.String(), nil
+}
+
+func (g *Generator) generateBatchPut(q query.Query, modelName string) (string, error) {
+	paramName := pluralize(safeLowerCamel(modelName))
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "// %s :%s\n", q.Name, kindString(q.Kind))
+	fmt.Fprintf(&buf, "func (q *Queries) %s(ctx context.Context, %s []%s) error {\n", q.Name, paramName, modelName)
+	fmt.Fprintf(&buf, "\tif len(%s) == 0 {\n", paramName)
+	fmt.Fprintf(&buf, "\t\treturn nil\n")
+	fmt.Fprintf(&buf, "\t}\n")
+	fmt.Fprintf(&buf, "\treqs := make([]types.WriteRequest, 0, len(%s))\n", paramName)
+	fmt.Fprintf(&buf, "\tfor _, item := range %s {\n", paramName)
+	fmt.Fprintf(&buf, "\t\tav, err := q.marshal(item)\n")
+	fmt.Fprintf(&buf, "\t\tif err != nil {\n")
+	fmt.Fprintf(&buf, "\t\t\treturn invalidErr(err)\n")
+	fmt.Fprintf(&buf, "\t\t}\n")
+	fmt.Fprintf(&buf, "\t\treqs = append(reqs, types.WriteRequest{\n")
+	fmt.Fprintf(&buf, "\t\t\tPutRequest: &types.PutRequest{Item: av},\n")
+	fmt.Fprintf(&buf, "\t\t})\n")
+	fmt.Fprintf(&buf, "\t}\n")
+	fmt.Fprintf(&buf, "\treturn q.batchWrite(ctx, reqs)\n")
 	fmt.Fprintf(&buf, "}\n")
 	return buf.String(), nil
 }
@@ -389,6 +433,9 @@ func (g *Generator) generateUpdate(q query.Query, stmt partiql.UpdateStmt, model
 }
 
 func (g *Generator) generateDelete(q query.Query, stmt partiql.DeleteStmt, modelName string) (string, error) {
+	if isBatchDeleteQuery(q.Name) {
+		return g.generateBatchDelete(q, modelName)
+	}
 	pk, sk, err := g.resolveKeys(q)
 	if err != nil {
 		return "", err
@@ -463,6 +510,41 @@ func (g *Generator) generateDelete(q query.Query, stmt partiql.DeleteStmt, model
 	fmt.Fprintf(&buf, "\t\treturn ErrNotFound\n")
 	fmt.Fprintf(&buf, "\t}\n")
 	fmt.Fprintf(&buf, "\treturn normalizeError(err)\n")
+	fmt.Fprintf(&buf, "}\n")
+	return buf.String(), nil
+}
+
+func (g *Generator) generateBatchDelete(q query.Query, modelName string) (string, error) {
+	if _, ok := g.Models.FieldType(modelName, g.PK); !ok {
+		return "", fmt.Errorf("%s: model %s missing attribute %s", q.Name, modelName, g.PK)
+	}
+	if g.SK != "" {
+		if _, ok := g.Models.FieldType(modelName, g.SK); !ok {
+			return "", fmt.Errorf("%s: model %s missing attribute %s", q.Name, modelName, g.SK)
+		}
+	}
+	paramName := pluralize(safeLowerCamel(modelName))
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "// %s :%s\n", q.Name, kindString(q.Kind))
+	fmt.Fprintf(&buf, "func (q *Queries) %s(ctx context.Context, %s []%s) error {\n", q.Name, paramName, modelName)
+	fmt.Fprintf(&buf, "\tif len(%s) == 0 {\n", paramName)
+	fmt.Fprintf(&buf, "\t\treturn nil\n")
+	fmt.Fprintf(&buf, "\t}\n")
+	fmt.Fprintf(&buf, "\treqs := make([]types.WriteRequest, 0, len(%s))\n", paramName)
+	fmt.Fprintf(&buf, "\tfor _, item := range %s {\n", paramName)
+	fmt.Fprintf(&buf, "\t\tkey, err := q.marshalKey(item, %q", g.PK)
+	if g.SK != "" {
+		fmt.Fprintf(&buf, ", %q", g.SK)
+	}
+	fmt.Fprintf(&buf, ")\n")
+	fmt.Fprintf(&buf, "\t\tif err != nil {\n")
+	fmt.Fprintf(&buf, "\t\t\treturn invalidErr(err)\n")
+	fmt.Fprintf(&buf, "\t\t}\n")
+	fmt.Fprintf(&buf, "\t\treqs = append(reqs, types.WriteRequest{\n")
+	fmt.Fprintf(&buf, "\t\t\tDeleteRequest: &types.DeleteRequest{Key: key},\n")
+	fmt.Fprintf(&buf, "\t\t})\n")
+	fmt.Fprintf(&buf, "\t}\n")
+	fmt.Fprintf(&buf, "\treturn q.batchWrite(ctx, reqs)\n")
 	fmt.Fprintf(&buf, "}\n")
 	return buf.String(), nil
 }
@@ -641,14 +723,23 @@ type importSpec struct {
 
 func (g *Generator) collectImports(queries []query.Query) ([]importSpec, error) {
 	imports := map[string]string{
-		"context":  "context",
-		"dynamodb": "github.com/aws/aws-sdk-go-v2/service/dynamodb",
+		"context": "context",
 	}
+	needsDynamo := false
 	needsTypes := false
 	for _, q := range queries {
 		modelName, err := g.modelNameForQuery(q)
 		if err != nil {
 			return nil, err
+		}
+		if !isBatchWriteQuery(q.Name) {
+			switch q.Stmt.(type) {
+			case partiql.SelectStmt, partiql.InsertStmt, partiql.UpdateStmt, partiql.DeleteStmt:
+				needsDynamo = true
+			}
+		}
+		if isBatchWriteQuery(q.Name) {
+			needsTypes = true
 		}
 		switch q.Stmt.(type) {
 		case partiql.SelectStmt, partiql.UpdateStmt, partiql.DeleteStmt:
@@ -666,6 +757,9 @@ func (g *Generator) collectImports(queries []query.Query) ([]importSpec, error) 
 	}
 	if needsTypes {
 		imports["types"] = "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	}
+	if needsDynamo {
+		imports["dynamodb"] = "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	}
 	var list []importSpec
 	for alias, path := range imports {
@@ -687,8 +781,7 @@ func (g *Generator) attrTypesForQuery(q query.Query, modelName string) []string 
 		pk, sk, _ := g.resolveKeys(q)
 		conds := condMap(stmt.Where)
 		for _, attr := range append(append([]string{}, pk...), sk...) {
-			if cond, ok := conds[attr]; ok {
-				_ = cond
+			if _, ok := conds[attr]; ok {
 				if t, ok := g.Models.FieldType(modelName, attr); ok {
 					typesList = append(typesList, t)
 				}
@@ -890,6 +983,28 @@ func deriveModelName(queryName string) string {
 	return name
 }
 
+func pluralize(name string) string {
+	if name == "" {
+		return name
+	}
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, "y") && len(lower) > 1 {
+		prev := lower[len(lower)-2]
+		if prev != 'a' && prev != 'e' && prev != 'i' && prev != 'o' && prev != 'u' {
+			return name[:len(name)-1] + "ies"
+		}
+	}
+	if strings.HasSuffix(lower, "ch") || strings.HasSuffix(lower, "sh") {
+		return name + "es"
+	}
+	switch lower[len(lower)-1] {
+	case 's', 'x', 'z':
+		return name + "es"
+	default:
+		return name + "s"
+	}
+}
+
 func singularize(name string) string {
 	if strings.HasSuffix(name, "ies") && len(name) > 3 {
 		return name[:len(name)-3] + "y"
@@ -907,6 +1022,22 @@ func singularize(name string) string {
 
 func isCreateQuery(name string) bool {
 	return strings.HasPrefix(name, "Create")
+}
+
+func isBatchPutQuery(name string) bool {
+	return strings.HasPrefix(name, "BatchPut")
+}
+
+func isBatchDeleteQuery(name string) bool {
+	return strings.HasPrefix(name, "BatchDelete")
+}
+
+func isBatchWriteQuery(name string) bool {
+	return isBatchPutQuery(name) || isBatchDeleteQuery(name)
+}
+
+func isBatchGetQuery(name string) bool {
+	return strings.HasPrefix(name, "BatchGet")
 }
 
 func returnValueConst(ret *partiql.Returning) string {
