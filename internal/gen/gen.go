@@ -734,14 +734,20 @@ type importSpec struct {
 
 func (g *Generator) collectImports(queries []query.Query) ([]importSpec, error) {
 	imports := map[string]string{
-		"context":  "context",
-		"dynamodb": "github.com/aws/aws-sdk-go-v2/service/dynamodb",
+		"context": "context",
 	}
+	needsDynamo := false
 	needsTypes := false
 	for _, q := range queries {
 		modelName, err := g.modelNameForQuery(q)
 		if err != nil {
 			return nil, err
+		}
+		if !isBatchWriteQuery(q.Name) {
+			switch q.Stmt.(type) {
+			case partiql.SelectStmt, partiql.InsertStmt, partiql.UpdateStmt, partiql.DeleteStmt:
+				needsDynamo = true
+			}
 		}
 		if isBatchWriteQuery(q.Name) {
 			needsTypes = true
@@ -762,6 +768,9 @@ func (g *Generator) collectImports(queries []query.Query) ([]importSpec, error) 
 	}
 	if needsTypes {
 		imports["types"] = "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	}
+	if needsDynamo {
+		imports["dynamodb"] = "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	}
 	var list []importSpec
 	for alias, path := range imports {

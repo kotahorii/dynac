@@ -114,6 +114,9 @@ WHERE pk = ? AND sk = ?`)
 			t.Fatalf("generated code missing %q", want)
 		}
 	}
+	if strings.Contains(code, "\"github.com/aws/aws-sdk-go-v2/service/dynamodb\"") {
+		t.Fatalf("did not expect dynamodb import for batch-only queries")
+	}
 }
 
 func TestBuildKeyParamsSanitizesNames(t *testing.T) {
