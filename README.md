@@ -110,6 +110,11 @@ func main() {
 
 Note: This example assumes AWS credentials are configured and a DynamoDB table named "App" exists with `pk`/`sk` keys.
 
+## Sample App
+
+A runnable demo that exercises Get/List/Put/Update/Delete lives under `examples/sample-app`.
+See `examples/sample-app/README.md` for setup and run instructions.
+
 5. Validate queries without generating code:
 
 ```sh

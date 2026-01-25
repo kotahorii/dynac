@@ -1,0 +1,20 @@
+-- name: GetUser :one
+SELECT * FROM "App"
+WHERE pk = ? AND sk = ?
+
+-- name: ListUsersByOrg :many
+-- @limit 100
+SELECT * FROM "App"
+WHERE pk = ? AND begins_with(sk, ?)
+
+-- name: CreateUser :exec
+INSERT INTO "App" VALUE ?
+
+-- name: UpdateUser :exec
+UPDATE "App"
+SET email = ?
+WHERE pk = ? AND sk = ?
+
+-- name: DeleteUser :exec
+DELETE FROM "App"
+WHERE pk = ? AND sk = ?
