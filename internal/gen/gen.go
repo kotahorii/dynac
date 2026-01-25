@@ -108,15 +108,7 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 		return "", err
 	}
 	conds := condMap(stmt.Where)
-	var typeHints map[string]string
-	if q.Annotations.Index != nil {
-		typeHints = map[string]string{}
-		for _, attr := range append(append([]query.IndexAttr{}, q.Annotations.Index.PK...), q.Annotations.Index.SK...) {
-			if attr.TypeHint != "" {
-				typeHints[attr.Name] = strings.ToUpper(attr.TypeHint)
-			}
-		}
-	}
+	typeHints := indexTypeHints(q.Annotations.Index)
 	keyConds, params, err := g.buildKeyConds(modelName, keyPK, keySK, conds, typeHints)
 	if err != nil {
 		return "", err
@@ -613,6 +605,28 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 		}
 	}
 	return keyConds, params, nil
+}
+
+func indexTypeHints(idx *query.IndexDef) map[string]string {
+	if idx == nil {
+		return nil
+	}
+	hints := map[string]string{}
+	addHint := func(attr query.IndexAttr) {
+		if attr.TypeHint != "" {
+			hints[attr.Name] = strings.ToUpper(attr.TypeHint)
+		}
+	}
+	for _, attr := range idx.PK {
+		addHint(attr)
+	}
+	for _, attr := range idx.SK {
+		addHint(attr)
+	}
+	if len(hints) == 0 {
+		return nil
+	}
+	return hints
 }
 
 func (g *Generator) buildKeyParams(modelName string, pk, sk []string) ([]param, error) {
