@@ -532,24 +532,13 @@ func (g *Generator) generateBatchDelete(q query.Query, modelName string) (string
 	fmt.Fprintf(&buf, "\t}\n")
 	fmt.Fprintf(&buf, "\treqs := make([]types.WriteRequest, 0, len(%s))\n", paramName)
 	fmt.Fprintf(&buf, "\tfor _, item := range %s {\n", paramName)
-	fmt.Fprintf(&buf, "\t\tav, err := q.marshal(item)\n")
+	fmt.Fprintf(&buf, "\t\tkey, err := q.marshalKey(item, %q", g.PK)
+	if g.SK != "" {
+		fmt.Fprintf(&buf, ", %q", g.SK)
+	}
+	fmt.Fprintf(&buf, ")\n")
 	fmt.Fprintf(&buf, "\t\tif err != nil {\n")
 	fmt.Fprintf(&buf, "\t\t\treturn invalidErr(err)\n")
-	fmt.Fprintf(&buf, "\t\t}\n")
-	fmt.Fprintf(&buf, "\t\tpkVal := av[%q]\n", g.PK)
-	if g.SK != "" {
-		fmt.Fprintf(&buf, "\t\tskVal := av[%q]\n", g.SK)
-		fmt.Fprintf(&buf, "\t\tif pkVal == nil || skVal == nil {\n")
-	} else {
-		fmt.Fprintf(&buf, "\t\tif pkVal == nil {\n")
-	}
-	fmt.Fprintf(&buf, "\t\t\treturn ErrInvalid\n")
-	fmt.Fprintf(&buf, "\t\t}\n")
-	fmt.Fprintf(&buf, "\t\tkey := map[string]types.AttributeValue{\n")
-	fmt.Fprintf(&buf, "\t\t\t%q: pkVal,\n", g.PK)
-	if g.SK != "" {
-		fmt.Fprintf(&buf, "\t\t\t%q: skVal,\n", g.SK)
-	}
 	fmt.Fprintf(&buf, "\t\t}\n")
 	fmt.Fprintf(&buf, "\t\treqs = append(reqs, types.WriteRequest{\n")
 	fmt.Fprintf(&buf, "\t\t\tDeleteRequest: &types.DeleteRequest{Key: key},\n")

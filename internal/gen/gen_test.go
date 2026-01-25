@@ -106,8 +106,7 @@ WHERE pk = ? AND sk = ?`)
 		"q.batchWrite",
 		"func (q *Queries) BatchDeleteUsers",
 		"DeleteRequest",
-		"pkVal := av[\"pk\"]",
-		"skVal := av[\"sk\"]",
+		"q.marshalKey",
 	}
 	for _, want := range checks {
 		if !strings.Contains(code, want) {

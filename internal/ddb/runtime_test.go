@@ -48,6 +48,24 @@ func TestIsConditionalFailed(t *testing.T) {
 	}
 }
 
+func TestMarshalKeyIgnoresNonKeyFields(t *testing.T) {
+	type Item struct {
+		PK  string     `dynamodbav:"pk"`
+		Bad func() int `dynamodbav:"bad"`
+	}
+	q := &Queries{}
+	out, err := q.marshalKey(Item{PK: "id", Bad: func() int { return 1 }}, "pk")
+	if err != nil {
+		t.Fatalf("marshalKey: %v", err)
+	}
+	if out["pk"] == nil {
+		t.Fatalf("expected pk in result")
+	}
+	if _, ok := out["bad"]; ok {
+		t.Fatalf("did not expect non-key field in result")
+	}
+}
+
 func useBatchConfig(t *testing.T, chunk, retries int) {
 	t.Helper()
 	origChunk := batchWriteChunk

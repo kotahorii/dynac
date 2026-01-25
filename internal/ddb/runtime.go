@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -35,6 +37,61 @@ func (q *Queries) unmarshal(m map[string]types.AttributeValue, out any) error {
 
 func (q *Queries) marshalValue(v any) (types.AttributeValue, error) {
 	return attributevalue.Marshal(v)
+}
+
+func (q *Queries) marshalKey(v any, keys ...string) (map[string]types.AttributeValue, error) {
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no key attributes")
+	}
+	keySet := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		keySet[key] = struct{}{}
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil, fmt.Errorf("nil value")
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("expected struct")
+	}
+	rt := rv.Type()
+	raw := make(map[string]any, len(keys))
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		tag := field.Tag.Get("dynamodbav")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name := strings.Split(tag, ",")[0]
+		if name == "" {
+			continue
+		}
+		if _, ok := keySet[name]; !ok {
+			continue
+		}
+		fv := rv.Field(i)
+		if !fv.CanInterface() {
+			continue
+		}
+		raw[name] = fv.Interface()
+	}
+	for _, key := range keys {
+		if _, ok := raw[key]; !ok {
+			return nil, fmt.Errorf("missing key %s", key)
+		}
+	}
+	out := make(map[string]types.AttributeValue, len(raw))
+	for name, val := range raw {
+		av, err := q.marshalValue(val)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = av
+	}
+	return out, nil
 }
 
 func ptrBool(v bool) *bool { return &v }
@@ -94,6 +151,7 @@ var (
 	_ = (*Queries).marshal
 	_ = (*Queries).unmarshal
 	_ = (*Queries).marshalValue
+	_ = (*Queries).marshalKey
 	_ = (*Queries).batchWrite
 	_ = ptrBool
 )
