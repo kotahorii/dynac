@@ -118,6 +118,29 @@ WHERE pk = ? AND sk = ?`)
 	}
 }
 
+func TestGenerateIndexTypeHints(t *testing.T) {
+	code := generateCode(t, `package ddb
+
+type User struct {
+	UserID string `+"`"+`dynamodbav:"user_id"`+"`"+`
+	Score  int    `+"`"+`dynamodbav:"score"`+"`"+`
+}`, `-- name: ListUsersByScore :many
+-- @limit 10
+-- @index UserScoreIndex pk(user_id:S) sk(score:N)
+-- @projection all
+SELECT * FROM "App"
+WHERE user_id = ? AND score = ?`)
+	checks := []string{
+		"marshalValueAs(userId, \"S\")",
+		"marshalValueAs(score, \"N\")",
+	}
+	for _, want := range checks {
+		if !strings.Contains(code, want) {
+			t.Fatalf("generated code missing %q", want)
+		}
+	}
+}
+
 func TestBuildKeyParamsSanitizesNames(t *testing.T) {
 	modelPath := writeTempFile(t, "models.go", `package ddb
 

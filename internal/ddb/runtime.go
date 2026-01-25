@@ -39,6 +39,30 @@ func (q *Queries) marshalValue(v any) (types.AttributeValue, error) {
 	return attributevalue.Marshal(v)
 }
 
+func (q *Queries) marshalValueAs(v any, hint string) (types.AttributeValue, error) {
+	av, err := q.marshalValue(v)
+	if err != nil {
+		return nil, err
+	}
+	switch strings.ToUpper(hint) {
+	case "S":
+		if _, ok := av.(*types.AttributeValueMemberS); ok {
+			return av, nil
+		}
+	case "N":
+		if _, ok := av.(*types.AttributeValueMemberN); ok {
+			return av, nil
+		}
+	case "B":
+		if _, ok := av.(*types.AttributeValueMemberB); ok {
+			return av, nil
+		}
+	default:
+		return nil, fmt.Errorf("invalid type hint %s", hint)
+	}
+	return nil, fmt.Errorf("value does not match type hint %s", hint)
+}
+
 func (q *Queries) marshalKey(v any, keys ...string) (map[string]types.AttributeValue, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("no key attributes")
@@ -151,6 +175,7 @@ var (
 	_ = (*Queries).marshal
 	_ = (*Queries).unmarshal
 	_ = (*Queries).marshalValue
+	_ = (*Queries).marshalValueAs
 	_ = (*Queries).marshalKey
 	_ = (*Queries).batchWrite
 	_ = ptrBool

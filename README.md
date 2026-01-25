@@ -187,7 +187,7 @@ These rules are enforced by both `dynac vet` and `dynac generate`.
 
 - Supports up to 4 PK attributes and 4 SK attributes.
 - SK conditions must be left-contiguous (no gaps).
-- Optional type hints are accepted (`pk(user_id:S)`) and validated but not used in codegen yet.
+- Optional type hints are accepted (`pk(user_id:S)`) and used to bind index key values as S/N/B.
 
 ## Code Generation Behavior
 
