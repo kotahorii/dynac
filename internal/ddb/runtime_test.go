@@ -66,6 +66,41 @@ func TestMarshalKeyIgnoresNonKeyFields(t *testing.T) {
 	}
 }
 
+func TestMarshalValueAs(t *testing.T) {
+	q := &Queries{}
+	if av, err := q.marshalValueAs("id", "S"); err != nil {
+		t.Fatalf("marshalValueAs string: %v", err)
+	} else if _, ok := av.(*types.AttributeValueMemberS); !ok {
+		t.Fatalf("expected string attribute value")
+	}
+	if av, err := q.marshalValueAs(123, "N"); err != nil {
+		t.Fatalf("marshalValueAs number: %v", err)
+	} else if _, ok := av.(*types.AttributeValueMemberN); !ok {
+		t.Fatalf("expected number attribute value")
+	}
+	if av, err := q.marshalValueAs([]byte("x"), "B"); err != nil {
+		t.Fatalf("marshalValueAs binary: %v", err)
+	} else if _, ok := av.(*types.AttributeValueMemberB); !ok {
+		t.Fatalf("expected binary attribute value")
+	}
+	if av, err := q.marshalValueAs("id", "s"); err != nil {
+		t.Fatalf("marshalValueAs lowercase string: %v", err)
+	} else if _, ok := av.(*types.AttributeValueMemberS); !ok {
+		t.Fatalf("expected string attribute value")
+	}
+	if av, err := q.marshalValueAs(123, "n"); err != nil {
+		t.Fatalf("marshalValueAs lowercase number: %v", err)
+	} else if _, ok := av.(*types.AttributeValueMemberN); !ok {
+		t.Fatalf("expected number attribute value")
+	}
+	if _, err := q.marshalValueAs(123, "S"); err == nil {
+		t.Fatalf("expected type mismatch error")
+	}
+	if _, err := q.marshalValueAs("id", "X"); err == nil {
+		t.Fatalf("expected invalid hint error")
+	}
+}
+
 func useBatchConfig(t *testing.T, chunk, retries int) {
 	t.Helper()
 	origChunk := batchWriteChunk

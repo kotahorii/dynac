@@ -53,6 +53,7 @@ func (g *Generator) Generate(queries []query.Query) ([]byte, error) {
 type param struct {
 	Name string
 	Type string
+	Hint string
 }
 
 type keyCond struct {
@@ -107,7 +108,8 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 		return "", err
 	}
 	conds := condMap(stmt.Where)
-	keyConds, params, err := g.buildKeyConds(modelName, keyPK, keySK, conds)
+	typeHints := indexTypeHints(q.Annotations.Index)
+	keyConds, params, err := g.buildKeyConds(modelName, keyPK, keySK, conds, typeHints)
 	if err != nil {
 		return "", err
 	}
@@ -127,7 +129,11 @@ func (g *Generator) generateSelect(q query.Query, stmt partiql.SelectStmt, model
 	for i, p := range params {
 		valVar := fmt.Sprintf("v%d", i)
 		valueVars = append(valueVars, valVar)
-		fmt.Fprintf(&buf, "\t%s, err := q.marshalValue(%s)\n", valVar, p.Name)
+		if p.Hint != "" {
+			fmt.Fprintf(&buf, "\t%s, err := q.marshalValueAs(%s, %q)\n", valVar, p.Name, p.Hint)
+		} else {
+			fmt.Fprintf(&buf, "\t%s, err := q.marshalValue(%s)\n", valVar, p.Name)
+		}
 		fmt.Fprintf(&buf, "\tif err != nil {\n")
 		if q.Kind == query.KindMany {
 			fmt.Fprintf(&buf, "\t\treturn nil, invalidErr(err)\n")
@@ -549,7 +555,7 @@ func (g *Generator) generateBatchDelete(q query.Query, modelName string) (string
 	return buf.String(), nil
 }
 
-func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[string]partiql.Cond) ([]keyCond, []param, error) {
+func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[string]partiql.Cond, typeHints map[string]string) ([]keyCond, []param, error) {
 	var keyConds []keyCond
 	paramNames := map[string]bool{}
 	params := []param{}
@@ -561,7 +567,7 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 			return nil, nil, fmt.Errorf("%s: model %s missing attribute %s", modelName, modelName, attr)
 		}
 		idx := len(params)
-		params = append(params, param{Name: pname, Type: goType})
+		params = append(params, param{Name: pname, Type: goType, Hint: typeHints[attr]})
 		keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamIdx: []int{idx}})
 	}
 	for _, attr := range sk {
@@ -578,13 +584,13 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 			pname := uniqueName(safeLowerCamel(attr), paramNames)
 			paramNames[pname] = true
 			idx := len(params)
-			params = append(params, param{Name: pname, Type: goType})
+			params = append(params, param{Name: pname, Type: goType, Hint: typeHints[attr]})
 			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondEq, ParamIdx: []int{idx}})
 		case partiql.CondBeginsWith:
 			pname := uniqueName(safeLowerCamel(attr)+"Prefix", paramNames)
 			paramNames[pname] = true
 			idx := len(params)
-			params = append(params, param{Name: pname, Type: goType})
+			params = append(params, param{Name: pname, Type: goType, Hint: typeHints[attr]})
 			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBeginsWith, ParamIdx: []int{idx}})
 			return keyConds, params, nil
 		case partiql.CondBetween:
@@ -593,12 +599,34 @@ func (g *Generator) buildKeyConds(modelName string, pk, sk []string, conds map[s
 			fromIdx := len(params)
 			pto := uniqueName(safeLowerCamel(attr)+"To", paramNames)
 			paramNames[pto] = true
-			params = append(params, param{Name: pfrom, Type: goType}, param{Name: pto, Type: goType})
+			params = append(params, param{Name: pfrom, Type: goType, Hint: typeHints[attr]}, param{Name: pto, Type: goType, Hint: typeHints[attr]})
 			keyConds = append(keyConds, keyCond{Attr: attr, CondType: partiql.CondBetween, ParamIdx: []int{fromIdx, fromIdx + 1}})
 			return keyConds, params, nil
 		}
 	}
 	return keyConds, params, nil
+}
+
+func indexTypeHints(idx *query.IndexDef) map[string]string {
+	if idx == nil {
+		return nil
+	}
+	hints := map[string]string{}
+	addHint := func(attr query.IndexAttr) {
+		if attr.TypeHint != "" {
+			hints[attr.Name] = strings.ToUpper(attr.TypeHint)
+		}
+	}
+	for _, attr := range idx.PK {
+		addHint(attr)
+	}
+	for _, attr := range idx.SK {
+		addHint(attr)
+	}
+	if len(hints) == 0 {
+		return nil
+	}
+	return hints
 }
 
 func (g *Generator) buildKeyParams(modelName string, pk, sk []string) ([]param, error) {
