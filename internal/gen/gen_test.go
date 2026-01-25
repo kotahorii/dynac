@@ -20,8 +20,34 @@ func writeTempFile(t *testing.T, name, content string) string {
 	return path
 }
 
+func generateCode(t *testing.T, modelSrc, querySrc string) string {
+	t.Helper()
+	modelPath := writeTempFile(t, "models.go", modelSrc)
+	queryPath := writeTempFile(t, "queries.partiql", querySrc)
+	models, err := model.Parse([]string{modelPath})
+	if err != nil {
+		t.Fatalf("parse models: %v", err)
+	}
+	qs, err := query.LoadFile(queryPath)
+	if err != nil {
+		t.Fatalf("load queries: %v", err)
+	}
+	g := Generator{
+		PkgName: "ddb",
+		Table:   "App",
+		PK:      "pk",
+		SK:      "sk",
+		Models:  models,
+	}
+	out, err := g.Generate(qs)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	return string(out)
+}
+
 func TestGenerate(t *testing.T) {
-	modelPath := writeTempFile(t, "models.go", `package ddb
+	code := generateCode(t, `package ddb
 
 import t "time"
 
@@ -30,9 +56,7 @@ type User struct {
 	SK        string `+"`"+`dynamodbav:"sk"`+"`"+`
 	UserName  string `+"`"+`dynamodbav:"user_name"`+"`"+`
 	CreatedAt t.Time `+"`"+`dynamodbav:"created_at"`+"`"+`
-}`)
-
-	queryPath := writeTempFile(t, "queries.partiql", `-- name: GetUser :one
+}`, `-- name: GetUser :one
 SELECT * FROM "App"
 WHERE pk = ? AND sk = ?
 
@@ -48,28 +72,6 @@ INSERT INTO "App" VALUE ?
 UPDATE "App"
 SET created_at = ?
 WHERE pk = ? AND sk = ?`)
-
-	models, err := model.Parse([]string{modelPath})
-	if err != nil {
-		t.Fatalf("parse models: %v", err)
-	}
-	qs, err := query.LoadFile(queryPath)
-	if err != nil {
-		t.Fatalf("load queries: %v", err)
-	}
-
-	g := Generator{
-		PkgName: "ddb",
-		Table:   "App",
-		PK:      "pk",
-		SK:      "sk",
-		Models:  models,
-	}
-	out, err := g.Generate(qs)
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	code := string(out)
 	checks := []string{
 		"func (q *Queries) GetUser",
 		"begins_with(#n1, :v1)",
@@ -77,6 +79,35 @@ WHERE pk = ? AND sk = ?`)
 		"newCreatedAt t.Time",
 		"t \"time\"",
 		"\"#n0\": \"pk\"",
+	}
+	for _, want := range checks {
+		if !strings.Contains(code, want) {
+			t.Fatalf("generated code missing %q", want)
+		}
+	}
+}
+
+func TestGenerateBatchWrite(t *testing.T) {
+	code := generateCode(t, `package ddb
+
+type User struct {
+	PK string `+"`"+`dynamodbav:"pk"`+"`"+`
+	SK string `+"`"+`dynamodbav:"sk"`+"`"+`
+}`, `-- name: BatchPutUsers :exec
+INSERT INTO "App" VALUE ?
+
+-- name: BatchDeleteUsers :exec
+DELETE FROM "App"
+WHERE pk = ? AND sk = ?`)
+	checks := []string{
+		"func (q *Queries) BatchPutUsers",
+		"types.WriteRequest",
+		"PutRequest",
+		"q.batchWrite",
+		"func (q *Queries) BatchDeleteUsers",
+		"DeleteRequest",
+		"pkVal := av[\"pk\"]",
+		"skVal := av[\"sk\"]",
 	}
 	for _, want := range checks {
 		if !strings.Contains(code, want) {

@@ -1,8 +1,10 @@
 package ddb
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -38,10 +40,61 @@ func (q *Queries) marshalValue(v any) (types.AttributeValue, error) {
 func ptrBool(v bool) *bool { return &v }
 
 var (
+	batchWriteChunk      = 25
+	batchWriteMaxRetries = 5
+	batchWriteBaseDelay  = 50 * time.Millisecond
+	batchWriteSleep      = time.Sleep
+)
+
+type batchWriteClient interface {
+	BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
+}
+
+func (q *Queries) batchWrite(ctx context.Context, reqs []types.WriteRequest) error {
+	return batchWrite(ctx, q.Client, q.Table, reqs)
+}
+
+func batchWrite(ctx context.Context, client batchWriteClient, table string, reqs []types.WriteRequest) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+	send := func(items []types.WriteRequest) ([]types.WriteRequest, error) {
+		out, err := client.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				table: items,
+			},
+		})
+		if err != nil {
+			return nil, normalizeError(err)
+		}
+		return out.UnprocessedItems[table], nil
+	}
+	for i := 0; i < len(reqs); i += batchWriteChunk {
+		end := min(i+batchWriteChunk, len(reqs))
+		unprocessed, err := send(reqs[i:end])
+		if err != nil {
+			return err
+		}
+		for retry := 0; len(unprocessed) > 0; retry++ {
+			if retry >= batchWriteMaxRetries {
+				return ErrUnprocessed
+			}
+			batchWriteSleep(batchWriteBaseDelay * time.Duration(1<<retry))
+			unprocessed, err = send(unprocessed)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+var (
 	// Referenced by generated code.
 	_ = (*Queries).marshal
 	_ = (*Queries).unmarshal
 	_ = (*Queries).marshalValue
+	_ = (*Queries).batchWrite
 	_ = ptrBool
 )
 
