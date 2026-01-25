@@ -429,7 +429,7 @@ func (g *Generator) generateUpdate(q query.Query, stmt partiql.UpdateStmt, model
 		fmt.Fprintf(&buf, "}\n")
 		return buf.String(), nil
 	}
-	fmt.Fprintf(&buf, "\t_, err := q.Client.UpdateItem(ctx, input)\n")
+	fmt.Fprintf(&buf, "\t_, err = q.Client.UpdateItem(ctx, input)\n")
 	fmt.Fprintf(&buf, "\tif isConditionalFailed(err) {\n")
 	fmt.Fprintf(&buf, "\t\treturn ErrNotFound\n")
 	fmt.Fprintf(&buf, "\t}\n")
@@ -511,7 +511,7 @@ func (g *Generator) generateDelete(q query.Query, stmt partiql.DeleteStmt, model
 		fmt.Fprintf(&buf, "}\n")
 		return buf.String(), nil
 	}
-	fmt.Fprintf(&buf, "\t_, err := q.Client.DeleteItem(ctx, input)\n")
+	fmt.Fprintf(&buf, "\t_, err = q.Client.DeleteItem(ctx, input)\n")
 	fmt.Fprintf(&buf, "\tif isConditionalFailed(err) {\n")
 	fmt.Fprintf(&buf, "\t\treturn ErrNotFound\n")
 	fmt.Fprintf(&buf, "\t}\n")

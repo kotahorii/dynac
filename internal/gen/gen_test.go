@@ -174,6 +174,32 @@ WHERE user_id = ? AND score BETWEEN ? AND ?`)
 	}
 }
 
+func TestGenerateExecUpdateDeleteAssignsErr(t *testing.T) {
+	code := generateCode(t, `package ddb
+
+type User struct {
+	PK    string `+"`"+`dynamodbav:"pk"`+"`"+`
+	SK    string `+"`"+`dynamodbav:"sk"`+"`"+`
+	Email string `+"`"+`dynamodbav:"email"`+"`"+`
+}`, `-- name: UpdateUser :exec
+UPDATE "App"
+SET email = ?
+WHERE pk = ? AND sk = ?
+
+-- name: DeleteUser :exec
+DELETE FROM "App"
+WHERE pk = ? AND sk = ?`)
+	checks := []string{
+		"_, err = q.Client.UpdateItem",
+		"_, err = q.Client.DeleteItem",
+	}
+	for _, want := range checks {
+		if !strings.Contains(code, want) {
+			t.Fatalf("generated code missing %q", want)
+		}
+	}
+}
+
 func TestBuildKeyParamsSanitizesNames(t *testing.T) {
 	modelPath := writeTempFile(t, "models.go", `package ddb
 
