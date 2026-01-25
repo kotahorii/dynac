@@ -127,6 +127,27 @@ func runGenerate(args []string, stderr io.Writer) int {
 		writef(stderr, "write: %v\n", err)
 		return 1
 	}
+	runtimeOut, err := gen.Runtime()
+	if err != nil {
+		writef(stderr, "generate runtime: %v\n", err)
+		return 1
+	}
+	runtimePath := filepath.Join(*pkgPath, "runtime.go")
+	runtimeGenPath := filepath.Join(*pkgPath, "runtime_gen.go")
+	if _, err := os.Stat(runtimePath); err == nil {
+		if err := os.Remove(runtimeGenPath); err != nil && !os.IsNotExist(err) {
+			writef(stderr, "remove runtime_gen.go: %v\n", err)
+			return 1
+		}
+	} else if os.IsNotExist(err) {
+		if err := os.WriteFile(runtimeGenPath, runtimeOut, 0o644); err != nil {
+			writef(stderr, "write runtime: %v\n", err)
+			return 1
+		}
+	} else {
+		writef(stderr, "stat runtime.go: %v\n", err)
+		return 1
+	}
 	return 0
 }
 

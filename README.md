@@ -110,6 +110,11 @@ func main() {
 
 Note: This example assumes AWS credentials are configured and a DynamoDB table named "App" exists with `pk`/`sk` keys.
 
+## Sample App
+
+A runnable demo that exercises Get/List/Put/Update/Delete lives under `examples/sample-app`.
+See `examples/sample-app/README.md` for setup and run instructions.
+
 5. Validate queries without generating code:
 
 ```sh
@@ -138,7 +143,8 @@ Notes:
 - `generate` requires `--model`.
 - Queries are discovered by scanning `--queries` (default `queries/`) for `.partiql` files.
 - If you have no `queries/` directory, create it or pass `--queries` to point elsewhere.
-- If you set `--pkg` to a custom package, you must provide runtime helpers in that package (see `internal/ddb/runtime.go`).
+- `generate` writes `queries_gen.go` and `runtime_gen.go` into `--pkg`.
+  If a `runtime.go` already exists in that package, `runtime_gen.go` is not written.
 
 ## Query Format
 
