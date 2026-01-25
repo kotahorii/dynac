@@ -27,7 +27,18 @@ Go (from module path):
 go install github.com/kotahorii/dynac/cmd/dynac@latest
 ```
 
-Homebrew: planned (tap not published yet).
+Homebrew (tap):
+
+```sh
+brew install kotahorii/dynac/dynac
+```
+
+Or:
+
+```sh
+brew tap kotahorii/dynac
+brew install dynac
+```
 
 Ensure your `GOBIN` (or `$(go env GOPATH)/bin`) is on your `PATH` if you use `go install`.
 
