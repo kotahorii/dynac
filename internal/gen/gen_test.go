@@ -141,6 +141,39 @@ WHERE user_id = ? AND score = ?`)
 	}
 }
 
+func TestGenerateIndexTypeHintsForRanges(t *testing.T) {
+	code := generateCode(t, `package ddb
+
+type User struct {
+	UserID string `+"`"+`dynamodbav:"user_id"`+"`"+`
+	Tag    string `+"`"+`dynamodbav:"tag"`+"`"+`
+	Score  int    `+"`"+`dynamodbav:"score"`+"`"+`
+}`, `-- name: ListUsersByTagPrefix :many
+-- @limit 10
+-- @index UserTagIndex pk(user_id:S) sk(tag:S)
+-- @projection all
+SELECT * FROM "App"
+WHERE user_id = ? AND begins_with(tag, ?)
+
+-- name: ListUsersByScoreRange :many
+-- @limit 10
+-- @index UserScoreIndex pk(user_id:S) sk(score:N)
+-- @projection all
+SELECT * FROM "App"
+WHERE user_id = ? AND score BETWEEN ? AND ?`)
+	checks := []string{
+		"marshalValueAs(userId, \"S\")",
+		"marshalValueAs(tagPrefix, \"S\")",
+		"marshalValueAs(scoreFrom, \"N\")",
+		"marshalValueAs(scoreTo, \"N\")",
+	}
+	for _, want := range checks {
+		if !strings.Contains(code, want) {
+			t.Fatalf("generated code missing %q", want)
+		}
+	}
+}
+
 func TestBuildKeyParamsSanitizesNames(t *testing.T) {
 	modelPath := writeTempFile(t, "models.go", `package ddb
 

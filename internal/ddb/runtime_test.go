@@ -83,6 +83,16 @@ func TestMarshalValueAs(t *testing.T) {
 	} else if _, ok := av.(*types.AttributeValueMemberB); !ok {
 		t.Fatalf("expected binary attribute value")
 	}
+	if av, err := q.marshalValueAs("id", "s"); err != nil {
+		t.Fatalf("marshalValueAs lowercase string: %v", err)
+	} else if _, ok := av.(*types.AttributeValueMemberS); !ok {
+		t.Fatalf("expected string attribute value")
+	}
+	if av, err := q.marshalValueAs(123, "n"); err != nil {
+		t.Fatalf("marshalValueAs lowercase number: %v", err)
+	} else if _, ok := av.(*types.AttributeValueMemberN); !ok {
+		t.Fatalf("expected number attribute value")
+	}
 	if _, err := q.marshalValueAs(123, "S"); err == nil {
 		t.Fatalf("expected type mismatch error")
 	}
