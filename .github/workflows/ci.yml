@@ -64,4 +64,4 @@ jobs:
           cache: true
 
       - name: Integration test (DynamoDB Local)
-        run: go test ./examples/sample-app/internal/ddb -tags=integration -v
+        run: go test ./examples/sample-app/internal/ddb -tags=integration -v -count=1

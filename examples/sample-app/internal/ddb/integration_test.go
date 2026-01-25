@@ -22,7 +22,7 @@ import (
 )
 
 func TestCRUDWithDynamoDBLocal(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	endpoint := startDynamoDBLocal(t, ctx)
@@ -122,7 +122,7 @@ func startDynamoDBLocal(t *testing.T, ctx context.Context) string {
 		}
 	}()
 	req := testcontainers.ContainerRequest{
-		Image:        "amazon/dynamodb-local:latest",
+		Image:        dynamoDBLocalImage(),
 		ExposedPorts: []string{"8000/tcp"},
 		Cmd:          []string{"-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"},
 		WaitingFor:   wait.ForListeningPort("8000/tcp"),
@@ -169,6 +169,13 @@ func dockerSocketAvailable() bool {
 		return true
 	}
 	return false
+}
+
+func dynamoDBLocalImage() string {
+	if image := os.Getenv("DYNAMODB_LOCAL_IMAGE"); image != "" {
+		return image
+	}
+	return "amazon/dynamodb-local:2.5.0"
 }
 
 func createUserTable(t *testing.T, ctx context.Context, client *dynamodb.Client, table string) {
