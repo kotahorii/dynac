@@ -8,12 +8,15 @@ This document provides guidance for AI assistants working with the dynac codebas
 
 The validator is intentionally strict to prevent accidental table scans and unsafe queries.
 
+**Current Status**: Early-stage / v0.1.0 (2026-01-25). Expect breaking changes.
+
 ## Technology Stack
 
-- **Language**: Go 1.25+
-- **AWS SDK**: aws-sdk-go-v2
+- **Language**: Go 1.25 (uses iterators and range-over-int features)
+- **AWS SDK**: aws-sdk-go-v2 (v1.41.1)
 - **Testing**: Go testing, Testcontainers for integration tests
 - **Linting**: golangci-lint v2.8.0
+- **Dependencies**: Managed via Dependabot (weekly updates on Mondays)
 
 ## Project Structure
 
@@ -92,10 +95,25 @@ Code generator that produces:
 
 ### `internal/ddb`
 Runtime support library with:
-- Error types: `ErrNotFound`, `ErrConflict`, `ErrInvalid`, `ErrThrottled`, `ErrNotFoundTable`
+- Error types: `ErrNotFound`, `ErrConflict`, `ErrInvalid`, `ErrThrottled`, `ErrNotFoundTable`, `ErrUnprocessed`
 - `Queries` struct with DynamoDB client and table name
-- Marshal/unmarshal helpers
-- Batch write with chunking and retry
+- Marshal/unmarshal helpers: `marshal()`, `unmarshal()`, `marshalValue()`, `marshalValueAs()`, `marshalKey()`
+- Batch write with chunking (25 items) and retry (5 max, exponential backoff from 50ms)
+
+## Installation
+
+```sh
+# From source (in repository root)
+go install ./cmd/dynac
+
+# From module path
+go install github.com/kotahorii/dynac/cmd/dynac@latest
+
+# Homebrew
+brew install kotahorii/dynac/dynac
+# or
+brew tap kotahorii/dynac && brew install dynac
+```
 
 ## Development Workflow
 
@@ -154,9 +172,16 @@ SQL_STATEMENT
 ### Annotations
 - `@limit N` - Maximum items for `:many`
 - `@nolimit` - Allow unbounded `:many` (explicit opt-in)
-- `@index Name pk(a,b) sk(c,d)` - Use GSI/LSI
+- `@index Name pk(a,b) sk(c,d)` - Use GSI/LSI (up to 4 PK and 4 SK attributes)
 - `@projection all` - Required with `@index`
 - `@model TypeName` - Override model type inference
+
+#### Index Type Hints
+`@index` supports optional type hints for binding:
+```sql
+-- @index GSI1 pk(org_id:S) sk(created_at:N)
+```
+Valid hints: `S` (string), `N` (number), `B` (binary). When specified, the generator uses `marshalValueAs()` to enforce the type at code generation time.
 
 ### Validation Rules
 - `:many` requires `LIMIT`, `@limit`, or `@nolimit`
@@ -203,6 +228,12 @@ func (q *Queries) DeleteUser(ctx context.Context, pk string, sk string) error
 - INSERT with `Create` prefix -> `PutItem` with condition (`attribute_not_exists`)
 - UPDATE -> `UpdateItem` with condition (`attribute_exists`)
 - DELETE -> `DeleteItem` with condition (`attribute_exists`)
+- `BatchPut*` -> `BatchWriteItem` with chunking (25 items per request)
+- `BatchDelete*` -> `BatchWriteItem` with key-only marshaling
+
+#### RETURNING Clause
+- UPDATE with `:one` requires `RETURNING ALL OLD|NEW` and returns the item
+- DELETE with `:one` requires `RETURNING ALL OLD` and returns the deleted item
 
 ## Coding Conventions
 
@@ -240,6 +271,10 @@ Flags:
   --queries Query root directory (default: queries)
 ```
 
+**Output Behavior**:
+- `generate` writes `queries_gen.go` and `runtime_gen.go` into `--pkg`
+- If a custom `runtime.go` exists in that package, `runtime_gen.go` is not written (and is cleaned up if present)
+
 ## Common Tasks
 
 ### Adding a New Query Type
@@ -258,13 +293,24 @@ Flags:
 2. Update `internal/gen/runtime.go.tmpl` if needed
 3. Regenerate `internal/gen/runtime_template.go` from the template
 
+## CI/CD Pipeline
+
+The CI workflow (`.github/workflows/ci.yml`) runs on every push to `main` and on all PRs:
+
+1. **lint** - Runs golangci-lint v2.8.0 with 5-minute timeout
+2. **test** - Runs `gofmt` check and `go test ./...`
+3. **integration** - Runs DynamoDB Local tests with Testcontainers (`-tags=integration`)
+
+All jobs use Go version from `go.mod` and cache dependencies.
+
 ## Known Limitations
 
 - Only `SELECT *` projections (no column selection)
 - No filters on non-key attributes
-- No `OR`, `NOT`, `IN` operators
-- No batch read APIs (BatchGetItem)
+- No `OR`, `NOT`, `IN` operators, no `<`, `>`, `<=`, `>=` comparisons
+- No batch read APIs (BatchGetItem) - intentionally blocked with error message
 - SK conditions must be left-contiguous for composite keys
+- RETURNING clause only supports `ALL OLD` and `ALL NEW` modes
 
 ## Error Types Reference
 
